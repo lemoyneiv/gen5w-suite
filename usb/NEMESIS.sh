@@ -63,7 +63,15 @@ NEMESIS=/system/xbin/nemesis
 
 toast "Gen5W Suite: installing HMG-API + mods (please wait ~30s)..."
 
-# 1. Remove legacy/competing standalone NEMESIS packages cleanly (restores their stock backups first)
+# 1. Remove legacy/competing standalone NEMESIS packages + Leafia/Evergreen precursors cleanly
+uninstall_nemesis_pkg() {
+    local pkg=$1 out
+    [ -f "/data/nemesis/apps/$pkg/NEMESIS.data" ] || return 0
+    msg "Uninstalling legacy/conflicting NEMESIS package: $pkg"
+    out=$("$NEMESIS" uninstall "$pkg" 2>&1) || out=$("$NEMESIS" uninstall --force "$pkg" 2>&1) || fail_install "Could not uninstall $pkg: $out"
+    msg "$out"
+}
+
 for pkg in \
     aa.dpi \
     aa.ev.model \
@@ -75,16 +83,63 @@ for pkg in \
     projection.tbt \
     carplay.session \
     wireless.carplay.aa \
+    carplay.wifi.audio \
     voicehandler.vr-gates \
-    adb.tcp
+    adb.tcp \
+    light.vibes \
+    ambient.sound \
+    gen5w.ambient.sound
 do
-    if [ -f "/data/nemesis/apps/$pkg/NEMESIS.data" ]; then
-        msg "Uninstalling conflicting NEMESIS package: $pkg"
-        out=$("$NEMESIS" uninstall "$pkg" 2>&1) || out=$("$NEMESIS" uninstall --force "$pkg" 2>&1) || fail_install "Could not uninstall $pkg: $out"
+    uninstall_nemesis_pkg "$pkg"
+done
+
+# Sweep /data/nemesis/apps/* for any remaining Leafia or Evergreen precursor NEMESIS packages
+for app_dir in /data/nemesis/apps/*; do
+    [ -f "$app_dir/NEMESIS.data" ] || continue
+    pkg=${app_dir##*/}
+    is_precursor=0
+    case "$pkg" in
+        *leafia*|*Leafia*|*LEAFIA*|*evergreen*|*Evergreen*|*EVERGREEN*)
+            is_precursor=1 ;;
+        hmgapi|hmgapi.*)
+            ;;
+        *)
+            while IFS= read -r line; do
+                case "$line" in
+                    id=*leafia*|id=*Leafia*|id=*LEAFIA*|id=*evergreen*|id=*Evergreen*|id=*EVERGREEN*|\
+                    name=*leafia*|name=*Leafia*|name=*LEAFIA*|name=*evergreen*|name=*Evergreen*|name=*EVERGREEN*|\
+                    short-desc=*leafia*|short-desc=*Leafia*|short-desc=*evergreen*|short-desc=*Evergreen*)
+                        is_precursor=1
+                        break ;;
+                esac
+            done < "$app_dir/NEMESIS.data" ;;
+    esac
+    [ "$is_precursor" = 1 ] && uninstall_nemesis_pkg "$pkg"
+done
+
+# Clean up pre-HMG-API direct runtime installs (Leafia and Evergreen dev/early builds)
+for legacy_dir in /data/leafia /data/evergreen; do
+    if [ -f "$legacy_dir/uninstall.sh" ]; then
+        msg "Running legacy precursor uninstaller: $legacy_dir/uninstall.sh"
+        out=$(HMGAPI_FORCE=1 LEAFIA_FORCE=1 EVERGREEN_FORCE=1 sh "$legacy_dir/uninstall.sh" --purge 2>&1) \
+            || out=$(HMGAPI_FORCE=1 LEAFIA_FORCE=1 EVERGREEN_FORCE=1 sh "$legacy_dir/uninstall.sh" 2>&1) \
+            || fail_install "Legacy uninstall ($legacy_dir) failed: $out"
         msg "$out"
     fi
 done
-rm -rf /data/local/coldstart-heat >/dev/null 2>&1
+if [ -f /system/bin/app_process.leafia-stock ] || [ -f /system/bin/app_process.evergreen-stock ]; then
+    fail_install "Legacy Leafia/Evergreen app_process wrapper still present without uninstaller; restore stock first"
+fi
+if [ "$(getprop sys.boot_completed)" = 1 ]; then
+    for legacy_apk in leafia.app evergreen.app com.leafia.app com.evergreen.app; do
+        case "$(pm path "$legacy_apk" 2>/dev/null)" in
+            package:*)
+                msg "Removing legacy precursor app: $legacy_apk"
+                pm uninstall "$legacy_apk" >> "$LOG" 2>&1 ;;
+        esac
+    done
+fi
+rm -rf /data/local/coldstart-heat /data/leafia /data/evergreen >/dev/null 2>&1
 
 # 2. Install or update HMG-API Core 1.1.1-rc.1 via NEMESIS
 if [ -f /data/nemesis/apps/hmgapi/NEMESIS.data ]; then
@@ -114,9 +169,21 @@ if [ -f /data/hmgapi/state/journal.json ]; then
     "$HMGAPID" engine keep >> "$LOG" 2>&1 || "$HMGAPID" engine recover >> "$LOG" 2>&1
 fi
 
+# Remove any legacy Leafia/Evergreen mod folders inside /data/hmgapi/mods
+for mod_dir in /data/hmgapi/mods/*; do
+    [ -d "$mod_dir" ] || continue
+    legacy_id=${mod_dir##*/}
+    case "$legacy_id" in
+        *leafia*|*Leafia*|*evergreen*|*Evergreen*)
+            msg "Removing legacy precursor mod: $legacy_id"
+            "$HMGAPID" engine remove "$legacy_id" --from-nemesis >> "$LOG" 2>&1 ;;
+    esac
+done
+
 # 3. Activate car hook map (260507 + 260903) and pre-grant owner command switches
 msg "Configuring hook map verification and owner command permissions"
 "$HMGAPID" allow testing_maps on >> "$LOG" 2>&1
+"$HMGAPID" allow block_ambient_light off >> "$LOG" 2>&1
 "$HMGAPID" engine verify-map >> "$LOG" 2>&1 || msg "note: verify-map reported warnings (testing_maps is on)"
 
 for sw in \
@@ -130,17 +197,24 @@ do
     "$HMGAPID" allow "$sw" on >> "$LOG" 2>&1
 done
 
-# If upgrading from AwsomeFox aa-dpi 0.2.x (or if RESET_SETTINGS is present), ensure DPI 200 + 60fps defaults
+# If upgrading from AwsomeFox aa-dpi 0.2.x or an earlier build with tap_limit=true default (or RESET_SETTINGS), apply DPI 200 + tap_limit=false + 60fps
 if [ -f "$USB/HMGAPI/RESET_SETTINGS" ]; then
     msg "HMGAPI/RESET_SETTINGS found on USB: resetting mod settings to suite defaults"
     rm -f /data/hmgapi/settings/wireless-carplay-aa.json \
           /data/hmgapi/settings/adb.json \
           /data/hmgapi/settings/aa-dpi.json \
           /data/hmgapi/settings/egmp-aa-ev.json \
-          /data/hmgapi/settings/hmgapi-comfort.json
+          /data/hmgapi/settings/hmgapi-comfort.json \
+          /data/hmgapi/settings/light-vibes.json
 elif [ -f /data/hmgapi/mods/aa-dpi/mod.json ] && grep -q '"0\.2\.' /data/hmgapi/mods/aa-dpi/mod.json 2>/dev/null; then
-    msg "Upgrading aa-dpi from 0.2.x -> 0.3.0: applying target DPI 200 + 60fps window"
-    echo '{"dpi": 200, "real_dpi": "same", "tap_limit": true, "video_window": 6}' > /data/hmgapi/settings/aa-dpi.json
+    msg "Upgrading aa-dpi from 0.2.x -> 0.3.0: applying DPI 200, tap_limit=false, 60fps window"
+    echo '{"dpi": 200, "real_dpi": "same", "tap_limit": false, "video_window": 6}' > /data/hmgapi/settings/aa-dpi.json
+    chmod 600 /data/hmgapi/settings/aa-dpi.json
+elif [ -f /data/hmgapi/mods/aa-dpi/settings.json ] && [ -f /data/hmgapi/settings/aa-dpi.json ] \
+     && grep -q '"default": true' /data/hmgapi/mods/aa-dpi/settings.json 2>/dev/null \
+     && grep -q '"tap_limit": *true' /data/hmgapi/settings/aa-dpi.json 2>/dev/null; then
+    msg "Migrating aa-dpi tap_limit default to off"
+    echo '{"dpi": 200, "real_dpi": "same", "tap_limit": false, "video_window": 6}' > /data/hmgapi/settings/aa-dpi.json
     chmod 600 /data/hmgapi/settings/aa-dpi.json
 fi
 
@@ -150,7 +224,7 @@ install_suite_mod() {
     [ -f "$zip" ] || fail_install "Missing mod package $zip"
     if [ -d "/data/hmgapi/mods/$id" ]; then
         [ -f "/data/hmgapi/mods/$id/.disabled" ] && was_off=1
-        if ! grep -q "$SUITE_UUID" "/data/hmgapi/mods/$id/META-INF/hmgapi/manifest.json" 2>/dev/null; then
+        if ! grep -q "$SUITE_UUID" "/data/hmgapi/mods/$id/META-HMGAPI/manifest.json" 2>/dev/null; then
             msg "Migrating $id to unified suite author key (preserving settings)"
             "$HMGAPID" engine remove "$id" --from-nemesis >> "$LOG" 2>&1
         fi
@@ -170,9 +244,10 @@ install_suite_mod adb                 "$USB/HMGAPI/updates/02-adb.hmgapi.zip"
 install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
 install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
 install_suite_mod hmgapi-comfort      "$USB/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
+install_suite_mod light-vibes         "$USB/HMGAPI/updates/06-light-vibes.hmgapi.zip"
 
-if [ -f "$USB/HMGAPI/updates/06-brake-indicator-gen5w.hmgapi.zip" ]; then
-    install_suite_mod brake-indicator-gen5w "$USB/HMGAPI/updates/06-brake-indicator-gen5w.hmgapi.zip"
+if [ -f "$USB/HMGAPI/updates/07-brake-indicator-gen5w.hmgapi.zip" ]; then
+    install_suite_mod brake-indicator-gen5w "$USB/HMGAPI/updates/07-brake-indicator-gen5w.hmgapi.zip"
 fi
 
 # 5. Single atomic engine apply + mod APKs + NEMESIS package listing sync

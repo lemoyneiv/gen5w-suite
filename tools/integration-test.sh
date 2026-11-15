@@ -128,7 +128,20 @@ PY
     has "$P: wireless CarPlay bridge prop set" "prop/persist.iap2.iden.wireless=t" "$(cat "$R/settings.txt")"
     has "$P: egmp-aa-ev relay service scheduled" "egmp-aa-ev relay" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: hmgapi-comfort starter service scheduled" "hmgapi-comfort starter" "$(cat "$R/data/hmgapi/state/services.txt")"
+    has "$P: light-vibes lights service scheduled" "light-vibes lights" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: Comfort.apk companion app scheduled" "dev.lemoyne.comfort hmgapi-comfort" "$(cat "$R/data/hmgapi/state/apps.txt")"
+    has "$P: LightVibes.apk companion app scheduled" "lightvibes.app light-vibes" "$(cat "$R/data/hmgapi/state/apps.txt")"
+
+    AADPI_DEFAULTS=$(python3 - "$R/data/hmgapi/public/state.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))["mods"]["aa-dpi"]["settings"]
+if isinstance(s, list):
+    s = {x["key"]: x.get("value", x.get("default")) for x in s}
+print(f"dpi={s.get('dpi')} tap_limit={s.get('tap_limit')} video_window={s.get('video_window')}")
+PY
+)
+    check "$P: aa-dpi published defaults (dpi=200, tap_limit=False, video_window=6)" \
+        "dpi=200 tap_limit=False video_window=6" "$AADPI_DEFAULTS"
 
     # Restore everything back to stock and verify byte-identical /system
     eng restore

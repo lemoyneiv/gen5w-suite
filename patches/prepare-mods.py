@@ -16,7 +16,7 @@ working copies of the four upstream HMG-API mods:
      - Safe default usb=false so USB drives and wired CarPlay/Android Auto keep
        working immediately after install.
   3. aa-dpi (0.3.0):
-     - nemesis_conflicts: ["aa.dpi"], verified defaults (dpi=200, video_window=6).
+     - nemesis_conflicts: ["aa.dpi"], defaults (dpi=200, tap_limit=false, video_window=6).
   4. egmp-aa-ev (0.7.0):
      - nemesis_conflicts: ["aa.ev.model"].
 """
@@ -682,7 +682,7 @@ def _adapt_engine_test_for_standalone_wireless(test_path: Path) -> None:
 
 
 def patch_aa_dpi(repo: Path) -> None:
-    print("== Preparing aa-dpi 0.3.0")
+    print("== Preparing aa-dpi 0.3.0 (dpi=200, tap_limit=false, video_window=6)")
     mod_path = repo / "hmgapi-mod/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
     assert mod["version"] == "0.3.0"
@@ -691,10 +691,26 @@ def patch_aa_dpi(repo: Path) -> None:
 
     settings_path = repo / "hmgapi-mod/settings.json"
     sdata = json.loads(settings_path.read_text(encoding="utf-8"))
+    found_tap = False
+    for item in sdata["settings"]:
+        if item["key"] == "tap_limit":
+            item["default"] = False
+            found_tap = True
+    assert found_tap, "Expected tap_limit setting in aa-dpi settings.json"
+    write_json(settings_path, sdata)
+
     defaults = {s["key"]: s["default"] for s in sdata["settings"]}
     assert defaults["dpi"] == 200, f"Expected dpi default 200, got {defaults['dpi']}"
     assert defaults["video_window"] == 6, f"Expected video_window default 6, got {defaults['video_window']}"
-    assert defaults["tap_limit"] is True
+    assert defaults["tap_limit"] is False, f"Expected tap_limit default False, got {defaults['tap_limit']}"
+
+    dpi_hooks = repo / "hmgapi-mod/hooks/dev/aadpi/hook/DpiHooks.java"
+    hsrc = dpi_hooks.read_text(encoding="utf-8")
+    old_tap = 'boolean limit = mod.settingBoolean("tap_limit", true);'
+    new_tap = 'boolean limit = mod.settingBoolean("tap_limit", false);'
+    assert old_tap in hsrc, "Expected tap_limit fallback in DpiHooks.java"
+    dpi_hooks.write_text(hsrc.replace(old_tap, new_tap, 1), encoding="utf-8")
+
     _adapt_engine_test_for_standalone_wireless(repo / "hmgapi-mod/test/engine-test.sh")
 
 
@@ -708,6 +724,21 @@ def patch_egmp_aa_ev(repo: Path) -> None:
     _adapt_engine_test_for_standalone_wireless(repo / "hmgapi-mod/test/engine-test.sh")
 
 
+def patch_light_vibes(repo: Path) -> None:
+    if not (repo / "build.sh").exists():
+        return
+    print("== Preparing light-vibes 0.6.7")
+    bpath = repo / "build.sh"
+    bsrc = bpath.read_text(encoding="utf-8")
+    old_jar = "ANDROID_JAR=$SDK/platforms/android-19/android.jar"
+    new_jar = (
+        'if [ -f "$SDK/platforms/android-19/android.jar" ]; then ANDROID_JAR=$SDK/platforms/android-19/android.jar\n'
+        'else ANDROID_JAR=$(ls "$SDK"/platforms/android-*/android.jar | sort -V | tail -1); fi'
+    )
+    assert old_jar in bsrc, "Expected ANDROID_JAR line in light-vibes/build.sh"
+    bpath.write_text(bsrc.replace(old_jar, new_jar, 1), encoding="utf-8")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--work-dir", required=True, help="Directory containing working copies of upstream mod repos")
@@ -718,7 +749,8 @@ def main() -> int:
     patch_adb(w / "hmgapi-adb")
     patch_aa_dpi(w / "hmg-aa-dpi")
     patch_egmp_aa_ev(w / "egmp-aa-ev-hmg-api")
-    print("All 4 upstream mods prepared cleanly.")
+    patch_light_vibes(w / "light-vibes")
+    print("All upstream mods prepared cleanly.")
     return 0
 
 

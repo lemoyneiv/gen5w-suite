@@ -1,7 +1,7 @@
 #!/bin/sh
 # Build, test, sign, integration-verify, and package the complete Gen5W Suite:
 #
-#   ./build-suite.sh                 build core + 5 mods + unified USB installers
+#   ./build-suite.sh                 build core + 6 mods + unified USB installers
 #   ./build-suite.sh --with-extras   also build & include ../brake-indicator-gen5w
 #
 # Outputs in dist/:
@@ -59,6 +59,11 @@ fi
 export HMGAPI_KEY
 [ -f "$HMGAPI_KEY" ] || { echo "build-suite.sh: missing author key at $HMGAPI_KEY" >&2; exit 1; }
 
+# Ensure ~/.hmgapi resolves to KEY_DIR when absent so mods using ~/.hmgapi/* keystores share persistent keys
+if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
+    ln -s "$KEY_DIR" "$HOME/.hmgapi"
+fi
+
 # 2. Fetch (or reuse cached) upstream mod repositories at pinned commits
 CACHE_DIR=${MOD_CACHE_DIR:-$SUITE_ROOT/.cache/upstream}
 mkdir -p "$CACHE_DIR"
@@ -82,6 +87,8 @@ fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless
 fetch_upstream hmgapi-adb            https://github.com/Open-HMG/hmgapi-adb.git            2d3eff8087ccefc9843aa4fd0a162e0806414aee
 fetch_upstream hmg-aa-dpi            https://github.com/eliotwass/hmg-aa-dpi.git           4222625d25e2776f926cf372ff3220fc3ec6d20c
 fetch_upstream egmp-aa-ev-hmg-api    https://github.com/AwsomeFox/egmp-aa-ev-hmg-api.git   f12237caa205c8b13f86220169455388c30cf271
+fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          2bdd33a506f380d2bc0305284856d185416afeff
+fetch_upstream tinyalsa              https://github.com/tinyalsa/tinyalsa.git              a7cd26a17fe2add2ff38d2f281ed0b919187a068
 
 WORK_SRC="$SUITE_ROOT/out/work-src"
 rm -rf "$SUITE_ROOT/out" "$SUITE_ROOT/dist"
@@ -99,6 +106,12 @@ prepare_copy hmgapi-wireless-cp-aa fa672126f1fa2c37f457534fa6a476ad3b8a24b5
 prepare_copy hmgapi-adb            2d3eff8087ccefc9843aa4fd0a162e0806414aee
 prepare_copy hmg-aa-dpi            4222625d25e2776f926cf372ff3220fc3ec6d20c
 prepare_copy egmp-aa-ev-hmg-api    f12237caa205c8b13f86220169455388c30cf271
+prepare_copy light-vibes           2bdd33a506f380d2bc0305284856d185416afeff
+
+mkdir -p "$WORK_SRC/light-vibes/third_party"
+cp -a "$CACHE_DIR/tinyalsa" "$WORK_SRC/light-vibes/third_party/tinyalsa"
+git -C "$WORK_SRC/light-vibes/third_party/tinyalsa" checkout -qf a7cd26a17fe2add2ff38d2f281ed0b919187a068
+git -C "$WORK_SRC/light-vibes/third_party/tinyalsa" clean -fdx >/dev/null
 
 echo ""
 echo "=================================================================="
@@ -148,7 +161,7 @@ echo "=================================================================="
 
 echo ""
 echo "=================================================================="
-echo " STEP 4: Building, Testing & Signing aa-dpi 0.3.0 (DPI 200, 60fps)"
+echo " STEP 4: Building, Testing & Signing aa-dpi 0.3.0 (DPI 200, tap_limit=off, 60fps)"
 echo "=================================================================="
 (
     cd "$WORK_SRC/hmg-aa-dpi"
@@ -182,10 +195,25 @@ sh "$SUITE_ROOT/hmgapi-comfort/build.sh"
 cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.0.hmgapi.zip" "$SUITE_ROOT/dist/mods/"
 cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.0-nemesis-package.zip" "$SUITE_ROOT/dist/mods/"
 
+echo ""
+echo "=================================================================="
+echo " STEP 6b: Building, Testing & Signing light-vibes 0.6.7 (intense-effects)"
+echo "=================================================================="
+(
+    cd "$WORK_SRC/light-vibes"
+    python3 "$HMGAPI_SDK/bin/check-points.py" mod
+    sh "$HMGAPI_SDK/bin/check-scripts.sh" mod
+    ANDROID_HOME="$ANDROID_HOME" HMGAPI_KEY="$HMGAPI_KEY" HMGAPI_DIR="$HMGAPI" bash ./build.sh test
+    LVVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' mod/mod.json)
+    cp "dist/light-vibes-v${LVVER}.hmgapi.zip" "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}.hmgapi.zip"
+    cp "dist/light-vibes-v${LVVER}-nemesis-package.zip" "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}-nemesis-package.zip"
+)
+LVVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$WORK_SRC/light-vibes/mod/mod.json")
+
 if [ "$WITH_EXTRAS" = 1 ]; then
     echo ""
     echo "=================================================================="
-    echo " STEP 6b: Building Optional Extra brake-indicator-gen5w"
+    echo " STEP 6c: Building Optional Extra brake-indicator-gen5w"
     echo "=================================================================="
     BRAKE_REPO=${BRAKE_REPO:-$SUITE_ROOT/../brake-indicator-gen5w}
     [ -x "$BRAKE_REPO/build.sh" ] || { echo "Missing $BRAKE_REPO/build.sh" >&2; exit 1; }
@@ -203,7 +231,7 @@ echo ""
 echo "=================================================================="
 echo " STEP 7: Checking USB Installer Scripts & Assembling USB Sticks"
 echo "=================================================================="
-sh "$HMGAPI_SDK/bin/check-scripts.sh" "$SUITE_ROOT/usb/NEMESIS.sh"
+sh "$SUITE_ROOT/tools/installer-test.sh"
 
 STAGE_EXEC="$SUITE_ROOT/out/usb-execute"
 STAGE_LIST="$SUITE_ROOT/out/usb-list"
@@ -220,8 +248,9 @@ for d in "$STAGE_EXEC" "$STAGE_LIST" "$STAGE_UPD"; do
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0.hmgapi.zip"              "$d/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0.hmgapi.zip"          "$d/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.0.hmgapi.zip"      "$d/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
+    cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}.hmgapi.zip"      "$d/HMGAPI/updates/06-light-vibes.hmgapi.zip"
     if [ "$WITH_EXTRAS" = 1 ]; then
-        cp "$SUITE_ROOT/dist/mods/brake-indicator-gen5w-v${BVER}.hmgapi.zip" "$d/HMGAPI/updates/06-brake-indicator-gen5w.hmgapi.zip"
+        cp "$SUITE_ROOT/dist/mods/brake-indicator-gen5w-v${BVER}.hmgapi.zip" "$d/HMGAPI/updates/07-brake-indicator-gen5w.hmgapi.zip"
     fi
 done
 
@@ -233,6 +262,7 @@ for d in "$STAGE_EXEC" "$STAGE_LIST"; do
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0-nemesis-package.zip"              "$d/packages/hmgapi.aa-dpi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0-nemesis-package.zip"          "$d/packages/hmgapi.egmp-aa-ev.zip"
     cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.0-nemesis-package.zip"      "$d/packages/hmgapi.hmgapi-comfort.zip"
+    cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}-nemesis-package.zip"      "$d/packages/hmgapi.light-vibes.zip"
     if [ "$WITH_EXTRAS" = 1 ]; then
         cp "$SUITE_ROOT/dist/mods/brake-indicator-gen5w-v${BVER}-nemesis-package.zip" "$d/packages/hmgapi.brake-indicator-gen5w.zip"
     fi
@@ -271,7 +301,7 @@ published=${TODAY}
 [package.3]
 path=packages/hmgapi.aa-dpi.zip
 name=Android Auto DPI (0.3.0)
-short-desc=Target 200 DPI + 60 fps video window for widescreen Gen5W
+short-desc=Target 200 DPI, tap limit off, and 60 fps video window
 published=${TODAY}
 
 [package.4]
@@ -285,12 +315,18 @@ path=packages/hmgapi.hmgapi-comfort.zip
 name=Comfort & Startup (1.0.0)
 short-desc=Multi-tier auto seat/wheel heat + ventilation & welcome dismisser
 published=${TODAY}
+
+[package.6]
+path=packages/hmgapi.light-vibes.zip
+name=Light Vibes (${LVVER} Intense Effects)
+short-desc=Music & speed reactive ambient lighting for Gen5W
+published=${TODAY}
 EOF
 
 if [ "$WITH_EXTRAS" = 1 ]; then
     cat >> "$STAGE_LIST/NEMESIS.data" <<EOF
 
-[package.6]
+[package.7]
 path=packages/hmgapi.brake-indicator-gen5w.zip
 name=Brake Light Indicator (${BVER})
 short-desc=Status-bar brake lamp indicator with E-GMP regen + BLE OBD support
