@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "settings": [
+    {
+      "key": "welcome_dismiss",
+      "type": "toggle",
+      "default": true,
+      "title": "Auto-dismiss startup notice",
+      "description": "Dismisses the startup safety notice in Park on cold boot and QuickBoot screen wake (requires HMG-API startup notice switch on)."
+    },
+    {
+      "key": "welcome_delay_ms",
+      "type": "number",
+      "default": 800,
+      "title": "Startup notice delay (ms)",
+      "description": "Delay after screen wake before sending startup_notice dismiss (0-10000 ms)."
+    },
+    {
+      "key": "climate_enabled",
+      "type": "toggle",
+      "default": true,
+      "title": "Auto seat & wheel climate on EV Ready",
+      "description": "Applies seat heat, steering wheel heat, or summer ventilation once per drive when EV Ready engages, preserving active Bluelink climate."
+    },
+    {
+      "key": "heat_high_f",
+      "type": "number",
+      "default": 25,
+      "title": "Driver seat heat High at or below (F)",
+      "description": "Outside temperature threshold in whole degrees F for High (level 3) seat heat."
+    },
+    {
+      "key": "heat_med_f",
+      "type": "number",
+      "default": 38,
+      "title": "Driver seat heat Medium at or below (F)",
+      "description": "Outside temperature threshold in whole degrees F for Medium (level 2) seat heat."
+    },
+    {
+      "key": "heat_low_f",
+      "type": "number",
+      "default": 50,
+      "title": "Driver seat heat Low at or below (F)",
+      "description": "Outside temperature threshold in whole degrees F for Low (level 1) seat heat."
+    },
+    {
+      "key": "wheel_enabled",
+      "type": "toggle",
+      "default": true,
+      "title": "Auto steering wheel heat",
+      "description": "Turns steering wheel heat on when outside temperature is at or below the wheel threshold."
+    },
+    {
+      "key": "wheel_f",
+      "type": "number",
+      "default": 45,
+      "title": "Steering wheel heat On at or below (F)",
+      "description": "Outside temperature threshold in whole degrees F for steering wheel heat."
+    },
+    {
+      "key": "passenger_policy",
+      "type": "choice",
+      "default": "off",
+      "title": "Passenger seat policy",
+      "options": [
+        { "value": "off", "title": "Off (driver only)" },
+        { "value": "match", "title": "Match driver level" },
+        { "value": "lower", "title": "1 step lower than driver" }
+      ]
+    },
+    {
+      "key": "rear_left_policy",
+      "type": "choice",
+      "default": "off",
+      "title": "Rear left seat heat policy",
+      "description": "Two-level rear seats automatically map Medium to Low.",
+      "options": [
+        { "value": "off", "title": "Off" },
+        { "value": "match", "title": "Match driver level" },
+        { "value": "lower", "title": "1 step lower than driver" }
+      ]
+    },
+    {
+      "key": "rear_right_policy",
+      "type": "choice",
+      "default": "off",
+      "title": "Rear right seat heat policy",
+      "description": "Two-level rear seats automatically map Medium to Low.",
+      "options": [
+        { "value": "off", "title": "Off" },
+        { "value": "match", "title": "Match driver level" },
+        { "value": "lower", "title": "1 step lower than driver" }
+      ]
+    },
+    {
+      "key": "vent_enabled",
+      "type": "toggle",
+      "default": true,
+      "title": "Summer auto seat ventilation",
+      "description": "Applies front seat ventilation when outside temperature reaches the summer thresholds."
+    },
+    {
+      "key": "vent_low_f",
+      "type": "number",
+      "default": 75,
+      "title": "Seat ventilation Low at or above (F)",
+      "description": "Outside temperature threshold in whole degrees F for Low (level 1) ventilation."
+    },
+    {
+      "key": "vent_med_f",
+      "type": "number",
+      "default": 85,
+      "title": "Seat ventilation Medium at or above (F)",
+      "description": "Outside temperature threshold in whole degrees F for Medium (level 2) ventilation."
+    },
+    {
+      "key": "vent_high_f",
+      "type": "number",
+      "default": 95,
+      "title": "Seat ventilation High at or above (F)",
+      "description": "Outside temperature threshold in whole degrees F for High (level 3) ventilation."
+    },
+    {
+      "key": "toast_on_apply",
+      "type": "toggle",
+      "default": false,
+      "title": "Show notice when auto-climate activates",
+      "description": "Shows a brief head-unit banner summarizing the applied seat/wheel levels."
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+# Gen5W Unified HMG-API Suite (US Hyundai Ioniq 5 — `260507` & `260903`)
+
+Conflict-free, single-USB HMG-API suite and custom `hmgapi-comfort` mod built for **US Hyundai Ioniq 5** (`NEEV`, `NEEV23`, `NEEV23SE`) head units running **firmware `260507` or `260903`** with **NEMESIS (`>= 1.16`)** installed.
+
+Every mod in this suite is signed with a single trusted author key (`28ad71e0-07c0-8e61-8bf3-380cc71f9280`) registered in [`lemoyneiv/HMG-API`](https://github.com/lemoyneiv/HMG-API), eliminating `pm install` signature mismatches, `am startservice` background race loops, `/system` binary ownership collisions, and multi-stick reboot cycles.
+
+---
+
+## Included Components
+
+| Order | Component | Version | Key Customizations & Fixes |
+|---:|---|---|---|
+| Core | **[`lemoyneiv/HMG-API`](https://github.com/lemoyneiv/HMG-API)** | `1.1.1-rc.1` | Preserves BLE Central/GATT + coexistence filter + 100 ms `speed` refresh; merges upstream `1.1.0-rc.1` (`NEEV23`/`CEEV` `260903` maps); fixes `VehicleHub` `-40 °F` DATC wake sentinel & QuickBoot STR re-registration, `conditioning` route timeout window (`<= 18 min`), and `+2.5 s` Park welcome-notice confirmation |
+| `01` | **`wireless-carplay-aa`** | `2.2.1` | Integrates PR `#2` (`dipo.carplay.disable_bluetooth`), PR `#16` subset (`Keyframes` CarPlay freeze IDR recovery + `CpTurns` highway/rotary/stale-arrow fixes + post-route Compass replay, **without** `Watchdog`), PR `#28` (`wifi_direct` opt-in toggle), `leafiaaac.c` thread-safe codec load + LPCM `bitsPerChannel==0` normalization, and `260903` + `NEEV23SE` support |
+| `02` | **`adb`** | `1.0.1` | Safe out-of-box defaults (`usb: false`, `tcp: false`) so USB flash drives and wired CarPlay/Android Auto keep working immediately after install while turning off the Engineering Mode `eth0` subnet conflict |
+| `03` | **`aa-dpi`** | `0.3.0` | Upgraded to `eliotwass/hmg-aa-dpi` `0.3.0`: target **200 DPI**, **60 fps** video window (`video_window: 6`), stock `tap_limit: true` default, `nemesis_conflicts: ["aa.dpi"]` |
+| `04` | **`egmp-aa-ev`** | `0.7.0` | Google Maps EV routing over Android Auto (live SoC, range, charge curves, automatic DC fast-charger battery preconditioning), `nemesis_conflicts: ["aa.ev.model"]` |
+| `05` | **`hmgapi-comfort`** | `1.0.0` | **New native HMG-API mod** replacing both `hkmc-coldstart-heat` and `hkmc-factory82`: 3-tier cold heating + 3-tier warm seat ventilation + independent wheel threshold + passenger policy + 60 s post-wake fresh ambient temperature wait + per-drive welcome screen auto-dismisser + widescreen Gen5W dashboard app |
+| `06` *(opt)* | **[`brake-indicator-gen5w`](https://github.com/lemoyneiv/brake-indicator-gen5w)** | `0.7.5` | Optional (`./build-suite.sh --with-extras`): status-bar brake lamp indicator using E-GMP regen thresholds + BLE OBD-II ground-truth telemetry |
+
+---
+
+## One-Tap USB Installation (Recommended)
+
+Assumes **NEMESIS (`>= 1.16`)** is already installed on the head unit:
+
+1. Format a USB flash drive as **FAT32** (MBR).
+2. Extract **`dist/gen5w-suite-usb.zip`** directly to the **root** of the USB drive so `NEMESIS.data`, `NEMESIS.sh`, `packages/`, and `HMGAPI/` sit at the top level.
+3. With the car powered on (`READY` or Utility Mode) and the infotainment booted, insert the USB stick into the data USB port.
+4. When NEMESIS asks to execute the USB item, tap **Yes** once and wait ~30 seconds for the completion dialog/toast:
+   - Automatically uninstalls any conflicting legacy standalone NEMESIS packages (`aa.dpi`, `aa.ev.model`, `coldstart.heat`, `local.hkmc.factory82`, `wireless.projection`, `enhanced.projection`, `projection.tbt`, `adb.tcp`) and restores their stock backups first.
+   - Installs or updates **HMG-API Core `1.1.1-rc.1`**.
+   - Enables and verifies the car's hook map (`260507` or `260903`) and pre-grants owner permissions for comfort and EV preconditioning vehicle commands.
+   - Installs all 5 signed mods in dependency order (preserving existing `/data/hmgapi/settings/*.json` across author-key upgrades, while upgrading legacy `aa-dpi` `0.2.x` to `200 DPI` + `60 fps`).
+   - Runs **`hmgapid engine apply` once**, installs companion APKs (`Comfort.apk`), and syncs **NEMESIS Manager → My Packages**.
+5. **Restart the head unit once** (pinhole reset or power cycle) to activate all Zygote hooks and mods.
+
+### Optional Flag Files on the USB Stick (`HMGAPI/`)
+
+| File on USB | Effect |
+|---|---|
+| `HMGAPI/FORCE` | *(Included by default)* Allows HMG-API core to install even if `app_process` has a newer stock MD5 |
+| `HMGAPI/RESET_SETTINGS` | Resets all 5 suite mods back to suite default settings during install |
+| `HMGAPI/ENABLE_ALL` | Re-enables any mod that was previously toggled off |
+| `HMGAPI/AUTO_REBOOT` | Automatically reboots the head unit 2 seconds after a successful install |
+| `HMGAPI/suite-install.log` | Written back to the USB stick automatically at the end of installation |
+
+### Other Generated USB Layouts
+
+- **`dist/gen5w-suite-nemesis-store-usb.zip`**: Interactive NEMESIS `type=list` stick — opens **NEMESIS Manager → Package Store → USB** so packages can be inspected or installed one by one.
+- **`dist/gen5w-suite-hmgapi-updates-usb.zip`**: Contains `HMGAPI/FORCE` and `HMGAPI/updates/*.hmgapi.zip` for updating individual mods from inside the **HMG-API** app.
+
+---
+
+## Building & Running All Tests From Source
+
+### Prerequisites
+
+- Linux or macOS with JDK 17+, Python 3.10+, `clang` + `lld` (for `libleafiaaac.so` & `lpatch`), `zip`/`unzip`, and Android SDK (`platforms;android-19` and `build-tools`).
+- Sibling checkout of [`lemoyneiv/HMG-API`](https://github.com/lemoyneiv/HMG-API) at `../HMG-API` (or set `HMGAPI=/path/to/HMG-API`).
+- Persistent signing keys in `~/.hmgapi/` (or set `HMGAPI_KEY=/path/to/author.key`).
+
+### Build Command
+
+```sh
+./build-suite.sh
+# Or include brake-indicator-gen5w as mod 06:
+./build-suite.sh --with-extras
+```
+
+`build-suite.sh` runs:
+1. `patches/prepare-mods.py` on clean pinned checkouts of the 4 upstream mods.
+2. Offline hook-point & floor checks (`check-points.py`) against the `1.1.1-rc.1` SDK catalogue.
+3. Unit & engine tests for every mod (`CpTurnsTest`, `AaTurnsTest`, `KeyframesTest`, `leafiaaac_test`, `adb/test.sh`, `DpiTest`, `PrecondTest`/`RelayTest`/`SocCurveTest`, `ComfortPolicyTest` + `hmgapi-comfort/test.sh`).
+4. Gen5W KitKat toolbox shell verification (`check-scripts.sh`) on every head-unit script (`usb/NEMESIS.sh`, `open.sh`, `svc/start.sh`, `offload.sh`).
+5. Multi-mod integration verification (`tools/integration-test.sh`) installing and applying all mods simultaneously on simulated US Ioniq 5 `260507` and `260903` units (`NEEV`, `NEEV23`, `NEEV23SE`), then verifying byte-identical stock restoration.
+
+---
+
+## Repository Layout
+
+- [`build-suite.sh`](build-suite.sh) — Master build, test, signing, integration-test, and USB packaging script
+- [`patches/prepare-mods.py`](patches/prepare-mods.py) — Deterministic patcher for `wireless-carplay-aa`, `adb`, `aa-dpi`, and `egmp-aa-ev`
+- [`patches/wireless-pr16-no-watchdog.patch`](patches/wireless-pr16-no-watchdog.patch) — Extracted PR `#16` CarPlay freeze recovery + cluster TBT + compass restore (without `Watchdog`)
+- [`hmgapi-comfort/`](hmgapi-comfort/) — Source, tests, icons, and standalone builder for **Comfort & Startup (`hmgapi-comfort` `1.0.0`)**
+- [`usb/NEMESIS.data`](usb/NEMESIS.data), [`usb/NEMESIS.sh`](usb/NEMESIS.sh) — One-tap NEMESIS USB installer
+- [`tools/integration-test.sh`](tools/integration-test.sh) — Multi-mod `260507` + `260903` integration & stock-restore test suite
+
+## License
+
+GNU Affero General Public License v3.0 (`AGPL-3.0`). See [`LICENSE`](LICENSE).

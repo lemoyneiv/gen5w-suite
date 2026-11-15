@@ -1,0 +1,10 @@
+.cache/
+out/
+dist/
+hmgapi-comfort/out/
+hmgapi-comfort/dist/
+*.keystore
+*.p12
+*.key
+*.key.pub
+.DS_Store

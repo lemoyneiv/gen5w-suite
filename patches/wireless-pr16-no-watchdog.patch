@@ -1,0 +1,1080 @@
+diff --git a/wireless-carplay-aa/src/hmgapi/mods/wireless/Wireless.java b/wireless-carplay-aa/src/hmgapi/mods/wireless/Wireless.java
+index eebdf82..e538954 100644
+--- a/wireless-carplay-aa/src/hmgapi/mods/wireless/Wireless.java
++++ b/wireless-carplay-aa/src/hmgapi/mods/wireless/Wireless.java
+@@ -61,7 +61,7 @@ public final class Wireless extends ModEntry {
+         if (GPM.equals(app.packageName) && mod.settingBoolean("usb_drives", true)) usbDrives(mod, app);
+         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
+         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
+-        if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true))) dipo(mod, app);
++        if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true))) dipo(mod, app);
+     }
+ 
+     /**
+@@ -88,16 +88,113 @@ public final class Wireless extends ModEntry {
+      */
+     private void navigation(final ModContext mod, final LoadedApp app) {
+         if (!mod.settingBoolean("tbt", true)) return;
+-        MethodHook skip = new MethodHook() {
+-            @Override
+-            protected void beforeHookedMethod(Param p) {
+-                if (Car.phoneGuiding(app.context)) p.setResult(null);
+-            }
+-        };
+-        for (String m : NAVI_TBT) mod.hook(null, "framework.navigation_cluster." + m, skip);
++        for (final String m : NAVI_TBT) {
++            final boolean keep = java.util.Arrays.asList(NAVI_REPLAY).contains(m);
++            mod.hook(null, "framework.navigation_cluster." + m, new MethodHook() {
++                @Override
++                protected void beforeHookedMethod(Param p) {
++                    if (REPLAYING.get() != null) return;
++                    if (keep) record(m, p);
++                    if (muted(mod, app.context)) p.setResult(null);
++                }
++            });
++        }
++        try {
++            IntentFilter f = new IntentFilter(CP_ROUTE);
++            app.context.registerReceiver(new BroadcastReceiver() {
++                @Override
++                public void onReceive(Context c, Intent i) {
++                    boolean on = i.getBooleanExtra("on", true);
++                    cpRoute = on;
++                    mod.log("navigation: CarPlay route " + (on ? "on" : "off"));
++                    // after DiPO's clear has reached the cluster: the car navigation's own state again
++                    if (!on) new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(new Runnable() {
++                        @Override
++                        public void run() {
++                            replay(mod, app.context);
++                        }
++                    }, REPLAY_DELAY_MS);
++                }
++            }, f, "android.permission.BLUETOOTH_PRIVILEGED", null);
++        } catch (Throwable t) {
++            mod.error("navigation: CarPlay route receiver", t);
++        }
+         mod.log("navigation: turn-by-turn yields to the phone in " + app.processName);
+     }
+ 
++    /** from DiPO's CpTurns: a CarPlay route is on (extra "on"); same string in dipo/Dipo */
++    static final String CP_ROUTE = "hmgapi.mods.wireless.CP_ROUTE";
++    /** the last CarPlay route state DiPO told (null: none yet, then DiPO's turn-by-turn mode alone decides) */
++    static volatile Boolean cpRoute;
++    static volatile Boolean wasMuted;
++
++    /**
++     * The car navigation's cluster state calls, kept (the last of each, muted or not) to send
++     * again when a CarPlay route ends: it sends them when something changes, so parked after
++     * a route nothing would redraw the compass. Not the lanes, turn lists or destination name,
++     * which would be stale.
++     */
++    static final String[] NAVI_REPLAY = { "update_tbt_info", "update_tbt_sub_info", "update_tbt_sub_info_b",
++        "update_tbt_sub_info2", "update_tbt_sub_info2_b", "update_tbt_sub_info_2c", "update_remain_dis",
++        "update_tp_crossroad_name" };
++    static final long REPLAY_DELAY_MS = 1000;
++    static final ThreadLocal<Boolean> REPLAYING = new ThreadLocal<Boolean>();
++    /** point -> {method, this, args}, in the order last called */
++    static final java.util.LinkedHashMap<String, Object[]> lastCalls = new java.util.LinkedHashMap<String, Object[]>();
++
++    static void record(String point, MethodHook.Param p) {
++        synchronized (lastCalls) {
++            lastCalls.remove(point);
++            lastCalls.put(point, new Object[] { p.method, p.thisObject, p.args.clone() });
++        }
++    }
++
++    /** the kept calls again, through the hooks (REPLAYING lets them by), if the car navigation isn't muted */
++    static void replay(ModContext mod, Context c) {
++        if (muted(mod, c)) {
++            mod.log("navigation: not replaying its cluster state, still muted");
++            return;
++        }
++        Object[][] calls;
++        synchronized (lastCalls) {
++            calls = lastCalls.values().toArray(new Object[0][]);
++        }
++        int n = 0;
++        REPLAYING.set(Boolean.TRUE);
++        try {
++            for (Object[] x : calls) {
++                try {
++                    ((java.lang.reflect.Method) x[0]).invoke(x[1], (Object[]) x[2]);
++                    n++;
++                } catch (Throwable t) {
++                    mod.error("navigation: replay " + ((java.lang.reflect.Method) x[0]).getName(), t);
++                }
++            }
++        } finally {
++            REPLAYING.remove();
++        }
++        mod.log("navigation: CarPlay route ended, the car navigation's cluster state sent again (" + n + " call(s))");
++    }
++
++    /**
++     * The car navigation's turn-by-turn calls are skipped while Android Auto guides, or while
++     * CarPlay is in turn-by-turn mode with a route on. DiPO's mode can stay on after Apple
++     * Maps ends the route, and then nothing redraws the compass (the cluster showed its
++     * spinner, US EV6, 2026-11-08). Logged when it changes.
++     */
++    static boolean muted(ModContext mod, Context c) {
++        boolean aa = Car.androidAutoGuiding(c), cp = Car.carPlayGuiding(c);
++        Boolean route = cpRoute;
++        boolean m = aa || (cp && !Boolean.FALSE.equals(route));
++        Boolean was = wasMuted;
++        if (was == null || was != m) {
++            wasMuted = m;
++            mod.log("navigation: turn-by-turn " + (m ? "muted" : "back to the car") + " (Android Auto guiding " + aa
++                    + ", CarPlay turn-by-turn mode " + cp + ", CarPlay route " + route + ")");
++        }
++        return m;
++    }
++
+     /**
+      * The iAP2 server. Turn-by-turn ("tbt"): it offers RouteGuidance to the iPhone only
+      * when the car's stepofspec is 999 or more (US/Canada: 105), so HMG-API sets that one
+diff --git a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java
+index 8d3fd53..04e0117 100644
+--- a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java
++++ b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java
+@@ -47,6 +47,25 @@ final class CpTurns {
+     /** last HUD list sent (type, next, road), so an unchanged one isn't resent */
+     int hudType, hudNext;
+     String hudRoad;
++    /** the main turn on the cluster: component, maneuver index, its type and icon (shownIcon 0: nothing of ours shown) */
++    int shownId, shownIndex, shownType, shownIcon;
++    /**
++     * setting tbt_no_icon, for a maneuver with no arrow at all (the departure, or a type
++     * Apple adds later): "straight" sends a straight arrow with the distance (default),
++     * "clear" takes ours off the cluster, "skip" sends nothing (2.1.0: the last turn's arrow
++     * stays up), "no_info" sends icon 1. A cleared turn and icon 1 both draw the cluster's
++     * spinner while guidance is on (US EV6, 2026-11-08), and clearing also takes the distance.
++     */
++    String noIcon = "straight";
++    /** a destination name of ours is on the cluster (cleared when the route ends) */
++    boolean destShown;
++    /** told when a CarPlay route starts and ends (Dipo: the car navigation's cluster calls are muted only while one is on) */
++    interface Route {
++        void changed(boolean on);
++    }
++    Route route;
++    /** the last route state told (null: none yet) */
++    Boolean routeOn;
+ 
+     CpTurns(Context context, Cluster cluster, Runnable restart) {
+         this.context = context;
+@@ -233,12 +252,49 @@ final class CpTurns {
+     /** the iAP2 session ended (DiPO e/u.disconnected) */
+     void disconnected() {
+         reset();
+-        hudBlank();
++        end();
+         source = null;
+     }
+ 
+     /** route guidance stopped (DiPO e/u.nS: the car's navigation took turn-by-turn back, or state 0) */
+     void stop() {
++        end();
++    }
++
++    /**
++     * The route ended (or the session): ours off the cluster, the destination name too,
++     * and the car navigation told it can have the cluster back (it draws the compass;
++     * our cleared turn alone is the spinner while it stays muted, US EV6, 2026-11-08).
++     */
++    void end() {
++        release();
++        if (destShown) {
++            cluster.destinationName(0, "");
++            destShown = false;
++        }
++        route(false);
++    }
++
++    void route(boolean on) {
++        if (routeOn != null && routeOn == on) return;
++        routeOn = on;
++        if (route != null) route.changed(on);
++    }
++
++    /**
++     * The HUD, and the cluster's main turn and trip if one of ours is up (as the Android
++     * Auto turns' release): stock only blanked the HUD, so the last arrow and distance
++     * stayed on the cluster after guidance ended. Only ours, so the car's own
++     * navigation's turn is never cleared.
++     */
++    void release() {
++        if (shownIcon != 0) {
++            cluster.tbtInfo(0, 0, 0f, 0f, -1, 0, 0, 0, -1);
++            cluster.tbtSubInfo(0f, -1, 0, 0, 0, 0, 0, 0f, -1, 0);
++            shownIcon = 0;
++            Dipo.log("CarPlay turns: cluster turn and trip cleared");
++        }
++        logged = null;
+         hudBlank();
+     }
+ 
+@@ -267,7 +323,7 @@ final class CpTurns {
+             if (was == null || was.equals(s)) return;
+             Dipo.log("CarPlay: route guidance source changed from " + was + " to " + s + ", clearing turn-by-turn");
+             reset();
+-            hudBlank();
++            release();
+             if (restart != null) new Thread(restart, "hmgapi-cp-rg-restart").start();
+             return;
+         }
+@@ -280,6 +336,7 @@ final class CpTurns {
+             stop();
+             return;
+         }
++        route(true);
+         int[] list = u.list == null ? null : u.list.clone();
+         float dist = 0f;
+         if (u.nextStr != null && !u.nextStr.equals("")) {
+@@ -290,7 +347,10 @@ final class CpTurns {
+                 dist = 0f;
+             }
+         }
+-        if (u.state == 6) cluster.destinationName(0, u.destination);
++        if (u.state == 6) {
++            cluster.destinationName(0, u.destination);
++            destShown = u.destination != null && u.destination.length() > 0;
++        }
+         LinkedHashMap<Integer, Maneuver> m = maneuvers.get(id);
+         if (m == null || list == null) return;
+         Maneuver x = m.get(list[0]);
+@@ -304,17 +364,64 @@ final class CpTurns {
+             default: unit = Cluster.UNIT_M; break;
+         }
+         int icon = icon(x.type, x.side, x.junction, x.exit, u.state);
+-        // StartRoute has no direction: clear the previous app's HUD arrow.
+-        if (x.type == 11 && icon == 1) hudBlank();
++        // StartRoute has no direction: clear the previous app's HUD arrow (when icon 1 is sent)
++        if (x.type == 11 && icon == NO_INFO && "no_info".equals(noIcon)) hudBlank();
+         cluster.crossroadName(x.afterRoad);
+-        if (icon == 0) return;
++        String how = "table";
++        if (icon == 0) {
++            if (shownIcon != 0 && shownId == id && shownIndex == list[0] && shownType == x.type) {
++                // the same maneuver, updated without its exit angle (DiPO resets it): keep its arrow
++                icon = shownIcon;
++                how = "kept";
++            } else {
++                // geometry the table doesn't have: the nearest icon the car has, never the last turn's
++                icon = fallback(x.type, x.side, x.junction, x.exit);
++                how = "nearest";
++            }
++        }
++        // no arrow at all (the table's NO_INFO for StartRoute, or an unknown type): setting tbt_no_icon
++        if (icon == 0 || icon == NO_INFO) {
++            if ("straight".equals(noIcon)) {
++                icon = 65;
++                how = "straight";
++            } else if ("no_info".equals(noIcon)) {
++                icon = NO_INFO;
++                if (!how.equals("table")) how = "no_info";
++            } else {
++                logTurn(id, list[0], x, "no arrow (" + noIcon + ")", dist, unit);
++                // clear: ours off the cluster (turn, trip, HUD), once; skip: leave it
++                if (!"skip".equals(noIcon) && shownIcon != 0) release();
++                return;
++            }
++        }
++        logTurn(id, list[0], x, "icon " + icon + " (" + how + ")", dist, unit);
++        // no HUD list for these (sendHud): blank the last turn's, once
++        if (icon < 64 && hudType != -1) hudBlank();
+         cluster.tbtInfo(icon, 0, 0f, dist, 0, 0, unit, 0, 0);
++        shownId = id;
++        shownIndex = list[0];
++        shownType = x.type;
++        shownIcon = icon;
+         sendHud(icon, id, u);
+         sendHudDist(dist, unit);
+         sendTrip(u);
+         sendAhead(id, u);
+     }
+ 
++    /** last turn logged, without the distance: a new line only when the maneuver or what's shown changes */
++    String logged;
++
++    void logTurn(int id, int index, Maneuver x, String what, float dist, int unit) {
++        String k = "maneuver " + id + "/" + index + " type " + x.type + " side " + x.side + " junction " + x.junction
++                + " exit " + x.exit + ": " + what;
++        if (k.equals(logged)) return;
++        logged = k;
++        Dipo.log("CarPlay turns: " + k + ", " + dist + " (unit " + unit + ")");
++    }
++
++    /** the cluster's main turn with no arrow */
++    static final int NO_INFO = 1;
++
+     /**
+      * The cluster icon for a maneuver: iAP2 ManeuverType, driving side (0 right-hand
+      * traffic, 1 left), junction type (0 intersection, 1 roundabout) and exit angle, as
+@@ -391,23 +498,74 @@ final class CpTurns {
+         }
+     }
+ 
+-    /** an upcoming turn's small icon (HUD list and turn list): 64 none, 65 straight, 66-68 right, 69-71 left, 72/73 U-turn */
++    /**
++     * An upcoming turn's icon (HUD list and the turns ahead): the table's, else the nearest
++     * (fallback), else straight (65). Never 64: the cluster draws its spinner for it, and far
++     * from a turn it draws its card from the turns ahead.
++     */
+     static int aheadIcon(int type, int side, int junction, int exit) {
+-        if (type == 1) {
+-            if (exit == -120 && junction == 0) return 69;
+-            if (exit == -90 && side == 0 && junction == 0) return 70;
+-            if (exit == -60 && junction == 0) return 71;
+-            return 70;
+-        }
+-        if (type == 2) {
+-            if (exit == 60 && junction == 0) return 66;
+-            if (exit == 90 && side == 0 && junction == 0) return 67;
+-            if (exit == 120 && junction == 0) return 68;
+-            return 67;
+-        }
+-        if (type == 3) return 65;
+-        if (type == 4) return side == 0 ? 72 : 73;
+-        return 64;
++        int t = icon(type, side, junction, exit, 0);
++        if (t >= 64) return t;
++        t = fallback(type, side, junction, exit);
++        return t != 0 ? t : 65;
++    }
++
++    /**
++     * The nearest icon the car has for a maneuver the table doesn't match (iAP2 ManeuverType,
++     * as CarPlay's CPManeuverType), the same icons Android Auto's turns use: highway exits
++     * 81/82 (86 with no side), on-ramps and highway changes 172-174, keep left/right as the
++     * forks 174/173, roundabouts by the exit's angle. 0: nothing to show (the departure, a type
++     * this doesn't know), for setting tbt_no_icon.
++     */
++    static int fallback(int type, int side, int junction, int exit) {
++        if (isRoundabout(type) || junction == 1) {
++            if (exit == 0 && (type == 1 || type == 20)) return 105;   // left at a roundabout, no angle
++            if (exit == 0 && (type == 2 || type == 21)) return 99;
++            return roundabout(type == 19 ? 180 : exit);
++        }
++        switch (type) {
++            case 0: case 3: case 5: return 65;        // no turn, straight ahead, follow the road
++            case 1: case 20:                          // left turn (at the end of the road)
++                if (exit <= -105) return 69;
++                if (exit < -75 || exit == 0) return 70;
++                return 71;
++            case 2: case 21:
++                if (exit >= 105) return 68;
++                if (exit > 75 || exit == 0) return 67;
++                return 66;
++            case 47: return 69;                       // sharp left/right, slight left/right
++            case 48: return 68;
++            case 49: return 71;
++            case 50: return 66;
++            case 4: case 18: case 26: return side == 1 ? 73 : 72;   // U-turns
++            case 8: return 86;                        // off ramp, no side
++            case 22: return 82;                       // highway off ramp left/right
++            case 23: return 81;
++            case 9: case 51: return 172;              // on ramp, change highway
++            case 13: case 52: return 174;             // keep left, change highway left
++            case 14: case 53: return 173;
++            case 15: case 16: case 17: return 176;    // ferries
++            case 10: case 12: case 27: return 112;    // end of navigation, arrive
++            case 24: return 114;
++            case 25: return 113;
++            default: return 0;                        // 11 (departure) and anything new
++        }
++    }
++
++    /** enter/exit roundabout, U-turn at a roundabout, roundabout exits 1-19 */
++    static boolean isRoundabout(int type) {
++        return type == 6 || type == 7 || type == 19 || (type >= 28 && type <= 46);
++    }
++
++    /**
++     * A roundabout exit's icon from CarPlay's exit angle (degrees, negative to the left, 0
++     * straight on): the nearest of the car navigation's own eight, as Android Auto's
++     * (96 straight, 97, 99 right, 100, 102 back, 104, 105 left, 107). Never 103 or 106.
++     */
++    static int roundabout(int exit) {
++        int d = ((exit % 360) + 360) % 360;
++        int[] icons = {96, 97, 99, 100, 102, 104, 105, 107};
++        return icons[((d + 22) / 45) % 8];
+     }
+ 
+     /** the HUD's list frame (0xF2): count, this icon, the next turn's icon, 0, road after this turn (UTF-16LE) */
+diff --git a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java
+index 657e9fb..f452ddc 100644
+--- a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java
++++ b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java
+@@ -43,12 +43,17 @@ import hmgapi.hook.Points;
+  * for it: its own wireless CarPlay off (that's Hyundai's, not this one), its iAP2
+  * listener ignoring the bridge's sessions, the reconnect crash fix and the first-connect
+  * notice fix.
++ *
++ * Picture ("picture"): asks the phone for a new key frame when the CarPlay picture
++ * stalls, which the stock app never does (Keyframes has the why and the when).
+  */
+ public final class Dipo {
+     private Dipo() {}
+ 
+     static final String IAP2_ACTION = "com.remote.service.IAP2SERVICE";
+     static final String CP_FIRST_CONNECTED = "com.android.app.PhoneProjection.CP_FIRST_CONNECTED";
++    /** to the car navigation (Wireless.navigation): a CarPlay route is on (extra "on"); same string there */
++    static final String CP_ROUTE = "hmgapi.mods.wireless.CP_ROUTE", NAVIGATION = "com.mnsoft.navi";
+     /** iAP2 listener type for route guidance (notifications 120, 121, 122) */
+     static final int LISTENER_ROUTE_GUIDANCE = 4096;
+     static final int RG_UPDATE = 120, RG_MANEUVER = 121, RG_LANES = 122;
+@@ -87,6 +92,14 @@ public final class Dipo {
+             m.nativePatch(a, "libCarPlayAudio.so");   // offer AAC and Opus on Wi-Fi
+             m.nativePatch(a, "libCarPlayUtils.so");   // its AudioConverter calls go to libleafiaaac.so
+         }
++        if (m.settingBoolean("picture", true)) {
++            try {
++                picture(m.settingBoolean("picture_periodic", false), periodMs(m.settingString("picture_period", "5")));
++            } catch (Throwable t) {
++                // its own points only: turn-by-turn and the bridge still start
++                error("CarPlay picture: off", t);
++            }
++        }
+         if (tbt) turnByTurn();
+         if (bridge) bridge();
+         if (!tbt && !bridge) return;
+@@ -129,6 +142,30 @@ public final class Dipo {
+                 restartRouteGuidance();
+             }
+         });
++        turns.noIcon = mod.settingString("tbt_no_icon", "straight");
++        turns.route = new CpTurns.Route() {
++            @Override
++            public void changed(final boolean on) {
++                Context c = app.context;
++                try {
++                    Intent i = new Intent(CP_ROUTE);
++                    i.setPackage(NAVIGATION);
++                    i.putExtra("on", on);
++                    c.sendBroadcast(i);
++                } catch (Throwable t) {
++                    error("CarPlay route state", t);
++                }
++                log("CarPlay turns: route " + (on ? "on" : "off") + ", told the car navigation (DiPO turn-by-turn mode "
++                        + Car.carPlayGuiding(c) + ")");
++                // does DiPO's own mode follow the route? (it decides whether the car navigation is muted without us)
++                if (!on) turnsHandler.postDelayed(new Runnable() {
++                    @Override
++                    public void run() {
++                        log("CarPlay turns: 5 s after the route ended, DiPO turn-by-turn mode " + Car.carPlayGuiding(app.context));
++                    }
++                }, 5000);
++            }
++        };
+         rg = new RgListener();
+         mod.hook(app.classLoader, "dipo.iap2_proxy.stop_route_guidance", new MethodHook() {
+             @Override
+@@ -142,7 +179,7 @@ public final class Dipo {
+                 });
+             }
+         });
+-        log("CarPlay: turn-by-turn to the cluster (HMG-API's route guidance listener)");
++        log("CarPlay: turn-by-turn to the cluster (HMG-API's route guidance listener), no-arrow turns: " + turns.noIcon);
+     }
+ 
+     static void post(Runnable r) {
+@@ -217,6 +254,171 @@ public final class Dipo {
+         }
+     }
+ 
++    static Handler pictureHandler;
++    static Keyframes keyframes;
++    /** forceKeyFrame()'s answers since the last summary, for the log */
++    static final java.util.TreeMap<String, Integer> results = new java.util.TreeMap<String, Integer>();
++    /** a summary in HMG-API's log this often during a session */
++    static final long SUMMARY_MS = 60000;
++
++    /** setting picture_period ("5", "10", ...: seconds) */
++    static long periodMs(String v) {
++        try {
++            return Math.max(2, Integer.parseInt(v.trim())) * 1000L;
++        } catch (NumberFormatException e) {
++            return 5000;
++        }
++    }
++    /** DiPO's CarPlayService, from the last callback */
++    static volatile Object cpService;
++
++    /**
++     * Picture ("picture"): asks the phone for a new key frame when the CarPlay picture
++     * stalls (Keyframes says when). forceKeyFrame() runs on the part's own thread, never
++     * on the callback's.
++     */
++    private static void picture(boolean periodic, long period) {
++        final ClassLoader cl = app.classLoader;
++        // every point it hooks, before it starts anything: no half-hooked picture thread
++        for (String id : new String[] { "dipo.carplay.force_key_frame", "dipo.carplay.decode_failure", "dipo.carplay.screen_timeout",
++                "dipo.carplay.session_started", "dipo.carplay.session_finalized" }) {
++            if (!Points.has(id)) {
++                log("CarPlay picture: off on this car (" + id + " not mapped)");
++                return;
++            }
++        }
++        Points.method(cl, "dipo.carplay.force_key_frame");   // there before anything is hooked (throws if not)
++        HandlerThread t = new HandlerThread("hmgapi-cp-picture");
++        t.start();
++        pictureHandler = new Handler(t.getLooper());
++        keyframes = new Keyframes(periodic, period);
++        try {
++            mod.hook(cl, "dipo.carplay.session_started", new MethodHook() {
++                @Override
++                protected void afterHookedMethod(final Param p) {
++                    final Object cp = p.thisObject;
++                    final int transport = (Integer) p.args[0];
++                    pictureHandler.post(new Runnable() {
++                        @Override
++                        public void run() {
++                            cpService = cp;
++                            keyframes.sessionStarted(transport);
++                            keyframes.summary();
++                            results.clear();
++                            firstPeriodic = true;
++                            pictureHandler.removeCallbacks(TICK);
++                            pictureHandler.removeCallbacks(SUMMARY);
++                            log("CarPlay picture: session started, " + (transport == 1 ? "wireless" : "wired (transport " + transport + ")")
++                                    + (keyframes.ticking() ? ", a key frame every " + keyframes.period / 1000 + " s" : ", key frames on a stall only"));
++                            if (keyframes.ticking()) pictureHandler.postDelayed(TICK, keyframes.period);
++                            pictureHandler.postDelayed(SUMMARY, SUMMARY_MS);
++                        }
++                    });
++                }
++            });
++            mod.hook(cl, "dipo.carplay.session_finalized", new MethodHook() {
++                @Override
++                protected void afterHookedMethod(Param p) {
++                    pictureHandler.post(new Runnable() {
++                        @Override
++                        public void run() {
++                            keyframes.sessionEnded();
++                            pictureHandler.removeCallbacks(TICK);
++                            pictureHandler.removeCallbacks(SUMMARY);
++                            logSummary("session ended");
++                        }
++                    });
++                }
++            });
++            mod.hook(cl, "dipo.carplay.decode_failure", new MethodHook() {
++                @Override
++                protected void afterHookedMethod(final Param p) {
++                    final Object cp = p.thisObject;
++                    final int type = (Integer) p.args[0];
++                    pictureHandler.post(new Runnable() {
++                        @Override
++                        public void run() {
++                            cpService = cp;
++                            int before = keyframes.failures;
++                            if (keyframes.decodeFailure(type, now())) forceKeyFrame("decoder failure type " + type + " (" + (before + 1) + " since the last key frame)");
++                        }
++                    });
++                }
++            });
++            mod.hook(cl, "dipo.carplay.screen_timeout", new MethodHook() {
++                @Override
++                protected void afterHookedMethod(final Param p) {
++                    final Object cp = p.thisObject;
++                    pictureHandler.post(new Runnable() {
++                        @Override
++                        public void run() {
++                            cpService = cp;
++                            if (keyframes.screenTimeout(now())) forceKeyFrame("screen timeout");
++                        }
++                    });
++                }
++            });
++        } catch (RuntimeException e) {
++            t.quit();   // the hooks already set post to a stopped thread, which drops their work
++            throw e;
++        } catch (Error e) {
++            t.quit();
++            throw e;
++        }
++        log("CarPlay picture: key frame on a stall" + (periodic ? ", and every " + keyframes.period / 1000 + " s on wireless" : ""));
++    }
++
++    static final Runnable TICK = new Runnable() {
++        @Override
++        public void run() {
++            if (!keyframes.ticking()) return;
++            long now = now();
++            if (keyframes.tick(now)) forceKeyFrame(null);
++            pictureHandler.postDelayed(this, keyframes.nextTick(now));
++        }
++    };
++
++    /** once a minute during a session: what the picture part saw and did */
++    static final Runnable SUMMARY = new Runnable() {
++        @Override
++        public void run() {
++            logSummary("last minute");
++            pictureHandler.postDelayed(this, SUMMARY_MS);
++        }
++    };
++
++    /** the summary line, even when nothing happened (a quiet minute is an answer too) */
++    static void logSummary(String what) {
++        log("CarPlay picture: " + what + ": " + keyframes.summary() + "; answers " + (results.isEmpty() ? "none" : results.toString()));
++        results.clear();
++    }
++
++    static boolean firstPeriodic;
++
++    static long now() {
++        return android.os.SystemClock.uptimeMillis();
++    }
++
++    /** on the picture thread; why null for the periodic one (logged the first time, then counted in the summaries) */
++    static void forceKeyFrame(String why) {
++        Object cp = cpService;
++        if (cp == null) return;
++        int failures = keyframes.failures;
++        keyframes.failures = 0;
++        try {
++            Object r = Points.call(app.classLoader, "dipo.carplay.force_key_frame", cp);
++            String k = String.valueOf(r);
++            Integer n = results.get(k);
++            results.put(k, n == null ? 1 : n + 1);
++            if (why != null) log("CarPlay picture: key frame asked for after " + why + ": " + r);
++            else if (failures > 0) log("CarPlay picture: periodic key frame, " + failures + " decoder failure(s) since the last: " + r);
++            else if (firstPeriodic) log("CarPlay picture: first periodic key frame of the session: " + r);
++            if (why == null) firstPeriodic = false;
++        } catch (Throwable t) {
++            error("CarPlay picture: forceKeyFrame failed", t);
++        }
++    }
++
+     private static void bridge() {
+         final ClassLoader cl = app.classLoader;
+         Bridge.cl = cl;
+diff --git a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Keyframes.java b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Keyframes.java
+new file mode 100644
+index 0000000..4b659d5
+--- /dev/null
++++ b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Keyframes.java
+@@ -0,0 +1,128 @@
++package hmgapi.mods.wireless.dipo;
++
++/**
++ * When to ask the phone for a new key frame on the CarPlay screen stream (part
++ * "picture"). No Android here: Dipo feeds it the hooks' events and the clock, and
++ * calls forceKeyFrame() when it says so. Host-tested (tools/picture).
++ *
++ * Why: the stock CarPlay library decodes each screen frame on the stream's read
++ * thread, and nothing in it or in DiPO ever calls forceKeyFrame(). Decoder failures
++ * and screen timeouts reach DiPO and are only logged. So once the Telechips decoder
++ * stops putting out frames, the picture stays frozen (audio is its own stream and
++ * carries on) until the driver leaves CarPlay and comes back, which rebuilds the
++ * renderer and starts a fresh stream. Seen on wireless sessions only (US EV6 260507).
++ *
++ * What: a key frame after a decoder failure or a screen timeout. Optionally (setting
++ * picture_periodic, off by default), on wireless also a key frame at least every period, for
++ * a decoder that hangs without reporting anything: the period is setting picture_period
++ * (5 s by default in settings.json), PERIOD_MS only when a caller gives none. Off by default
++ * because each one is a bitrate spike over Wi-Fi, and a 2 h drive with it off (US EV6,
++ * 2026-11-08) had no freeze: the recovery on a failure or timeout was enough. Never more than
++ * one every MIN_GAP_MS: key frames are large, and asking for them faster over a slow Wi-Fi
++ * link would make a stall worse.
++ */
++final class Keyframes {
++    static final long MIN_GAP_MS = 2000;
++    static final long PERIOD_MS = 10000;
++
++    /** decoder failure types (libCarPlayUtils): 0 resets its black-screen count, the rest are failures */
++    static final int NO_OUTPUT = 1, SEQUENCE_HEADER = 2, BLACK_SCREEN = 3;
++
++    private final boolean periodic;
++    final long period;
++    private boolean session, wireless;
++    private long last = -1;
++    /** failures since the last request (for the log) */
++    int failures;
++    /** for the log's summaries, since the last summary: requests by kind, failures by type (0-3), screen timeouts, events inside the minimum gap */
++    int periodicAsked, failureAsked, timeoutAsked, timeouts, limited;
++    final int[] types = new int[4];
++
++    Keyframes(boolean periodic) {
++        this(periodic, PERIOD_MS);
++    }
++
++    Keyframes(boolean periodic, long period) {
++        this.periodic = periodic;
++        this.period = period < MIN_GAP_MS ? MIN_GAP_MS : period;
++    }
++
++    void sessionStarted(int transport) {
++        session = true;
++        wireless = transport == 1;
++        last = -1;
++        failures = 0;
++    }
++
++    void sessionEnded() {
++        session = false;
++        wireless = false;
++    }
++
++    /** whether the periodic tick should run during this session */
++    boolean ticking() {
++        return session && wireless && periodic;
++    }
++
++    /** a decoder failure: true to ask for a key frame now */
++    boolean decodeFailure(int type, long now) {
++        if (type >= 0 && type < types.length) types[type]++;
++        if (type < NO_OUTPUT || type > BLACK_SCREEN) return false;
++        failures++;
++        if (!request(now)) {
++            limited++;
++            return false;
++        }
++        failureAsked++;
++        return true;
++    }
++
++    /** the screen stream timed out: true to ask for a key frame now */
++    boolean screenTimeout(long now) {
++        timeouts++;
++        if (!request(now)) {
++            limited++;
++            return false;
++        }
++        timeoutAsked++;
++        return true;
++    }
++
++    /** the periodic tick: true to ask for a key frame now (none was asked for in the last period) */
++    boolean tick(long now) {
++        if (!ticking()) return false;
++        if (last >= 0 && now - last < period) return false;
++        if (!request(now)) return false;
++        periodicAsked++;
++        return true;
++    }
++
++    /** ms until the next tick is due */
++    long nextTick(long now) {
++        if (last < 0) return period;
++        long d = last + period - now;
++        return d < MIN_GAP_MS ? MIN_GAP_MS : d;
++    }
++
++    /** whether anything happened since the last summary */
++    boolean eventful() {
++        return periodicAsked + failureAsked + timeoutAsked + timeouts + limited + types[0] + types[1] + types[2] + types[3] > 0;
++    }
++
++    /** what happened since the last summary, for the log, and starts the next one */
++    String summary() {
++        String s = "key frames asked " + periodicAsked + " periodic, " + failureAsked + " after a decoder failure, " + timeoutAsked
++                + " after a screen timeout; decoder failures " + types[1] + " no output, " + types[2] + " sequence header, " + types[3]
++                + " black screen (" + types[0] + " resets); screen timeouts " + timeouts + "; " + limited + " inside the " + MIN_GAP_MS / 1000 + " s gap";
++        periodicAsked = failureAsked = timeoutAsked = timeouts = limited = 0;
++        for (int i = 0; i < types.length; i++) types[i] = 0;
++        return s;
++    }
++
++    /** a failure or timeout means a stream is up, so these don't wait for onSessionStarted */
++    private boolean request(long now) {
++        if (last >= 0 && now - last < MIN_GAP_MS) return false;
++        last = now;
++        return true;
++    }
++}
+diff --git a/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java b/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java
+index 644fd74..060f7b6 100644
+--- a/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java
++++ b/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java
+@@ -89,7 +89,9 @@ public final class CpTurnsTest {
+                 CpTurns.icon(1, 1, 0, -91, 1) == 0 && CpTurns.icon(2, 1, 0, 91, 1) == 0
+                         && CpTurns.icon(11, 1, 0, 90, 1) == 0 && CpTurns.icon(11, 1, 1, 0, 1) == 0);
+         c = new Cluster();
++        // the departure's icon 1 as #15 sends it (tbt_no_icon "no_info"); the default "clear" is below
+         CpTurns t = new CpTurns(new android.content.Context(), c, null);
++        t.noIcon = "no_info";
+         t.maneuver(maneuver(0, 2, 1, 0, 90, "Test Road", 100));
+         t.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(1), 11, STR, s("100"),
+                 12, ENUM, i(2), 13, U16, i(0)));
+@@ -107,7 +109,60 @@ public final class CpTurnsTest {
+                 "road [Test Road]", "tbt 67 0 0.0 100.0 0 0 0 0 0",
+                 "hud f201430000" + utf16("Test Road"), "2c 0 0 100 0 0 0 0 0 0");
+         t.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(0)));
+-        expect("India route stop still clears HUD", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++        expect("India route stop still clears HUD (and the cluster turn and trip, as any state 0)",
++                "tbt 0 0 0.0 0.0 -1 0 0 0 -1", "sub 0.0 -1 0 0 0 0 0 0.0 -1 0", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++
++        // "clear": a departure takes the last turn off the cluster and HUD, never icon 1
++        // (a spinner that outlives the session on a US EV6's cluster)
++        CpTurns d = new CpTurns(new android.content.Context(), c, null);
++        d.noIcon = "clear";
++        d.maneuver(maneuver(0, 2, 1, 0, 90, "Test Road", 100));
++        d.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(1), 11, STR, s("100"), 12, ENUM, i(2), 13, U16, i(0)));
++        c.calls.clear();
++        d.maneuver(msg(0, U16, i(1), 1, U16, i(0), 3, ENUM, i(11)));
++        d.routeGuidance(msg(0, U16, i(1)));
++        expect("departure, clear: turn, trip and HUD cleared, no icon 1",
++                "road [Test Road]", "tbt 0 0 0.0 0.0 -1 0 0 0 -1", "sub 0.0 -1 0 0 0 0 0 0.0 -1 0", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++        d.routeGuidance(msg(0, U16, i(1)));
++        expect("departure again: nothing cleared twice", "road [Test Road]");
++
++        // default "straight": a departure shows a straight arrow with its distance, never icon 1
++        CpTurns e = new CpTurns(new android.content.Context(), c, null);
++        e.maneuver(maneuver(0, 11, 0, 0, 0, "Start Rd", 200));
++        c.calls.clear();
++        e.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(1), 11, STR, s("0.2"), 12, ENUM, i(1), 13, U16, i(0)));
++        expect("departure, default straight: 65 with the distance",
++                "road [Start Rd]", "tbt 65 0 0.0 0.2 0 0 2 0 0", "hud f201410000" + utf16("Start Rd"), "2c 2 2 0 0 0 0 0 0 0");
++    }
++
++    /** the maneuvers a US EV6's iPhone sent on 2026-11-08 that had no arrow (Rt 2 W, I-95 S, rotaries) */
++    static void driveTurns() {
++        int[][] seen = {   // type, side, junction, exit, icon
++            {8, 0, 0, 0, 86}, {13, 0, 0, 0, 174}, {14, 0, 0, 0, 173},
++            {28, 0, 1, 61, 97}, {29, 0, 1, -54, 107}, {29, 0, 1, -61, 107}, {29, 0, 1, -8, 96}, {29, 0, 1, 16, 96},
++            {29, 0, 1, 2, 96}, {29, 0, 1, 8, 96}, {30, 0, 1, -127, 104},
++        };
++        for (int[] v : seen) {
++            int got = CpTurns.icon(v[0], v[1], v[2], v[3], 1);
++            if (got == 0) got = CpTurns.fallback(v[0], v[1], v[2], v[3]);
++            check("11-08 drive: type " + v[0] + " junction " + v[2] + " exit " + v[3] + " -> " + v[4] + " (got " + got + ")", got == v[4]);
++            check("11-08 drive, turns ahead: type " + v[0] + " exit " + v[3] + " -> " + v[4], CpTurns.aheadIcon(v[0], v[1], v[2], v[3]) == v[4]);
++        }
++        check("highway exits keep their side, ramps and highway changes their forks",
++                CpTurns.fallback(22, 0, 0, 30) == 82 && CpTurns.fallback(23, 0, 0, 30) == 81 && CpTurns.fallback(9, 0, 0, 20) == 172
++                        && CpTurns.fallback(52, 0, 0, -20) == 174 && CpTurns.fallback(53, 0, 0, 20) == 173 && CpTurns.fallback(51, 0, 0, 0) == 172);
++        check("roundabout exits: one icon per 45 degrees, never 103 or 106",
++                CpTurns.roundabout(0) == 96 && CpTurns.roundabout(45) == 97 && CpTurns.roundabout(90) == 99 && CpTurns.roundabout(135) == 100
++                        && CpTurns.roundabout(180) == 102 && CpTurns.roundabout(-135) == 104 && CpTurns.roundabout(-90) == 105
++                        && CpTurns.roundabout(-45) == 107 && CpTurns.roundabout(-180) == 102 && CpTurns.roundabout(22) == 96 && CpTurns.roundabout(23) == 97);
++        boolean never64 = true;
++        for (int type = 0; type <= 60; type++)
++            for (int j = 0; j <= 1; j++)
++                for (int x = -180; x <= 180; x += 15) {
++                    int a = CpTurns.aheadIcon(type, 0, j, x), f = CpTurns.fallback(type, 0, j, x);
++                    if (a == 64 || a < 64 || f == 64 || f == 103 || f == 106 || a == 103 || a == 106) never64 = false;
++                }
++        check("never 64 (the spinner), 103 or 106 anywhere, and the turns ahead always get an arrow", never64);
+     }
+ 
+     public static void main(String[] a) throws Exception {
+@@ -122,6 +177,13 @@ public final class CpTurnsTest {
+             }
+         });
+         final int RIGHT = 2, LEFT = 1, STRAIGHT = 3, UTURN = 4, ARRIVE = 12, MILES = 1, KM = 0, FEET = 4;
++        final StringBuilder routes = new StringBuilder();
++        t.route = new CpTurns.Route() {
++            @Override
++            public void changed(boolean on) {
++                routes.append(on ? "on " : "off ");
++            }
++        };
+ 
+         t.maneuver(maneuver(0, RIGHT, 0, 0, 90, "Main St", 300));
+         t.maneuver(maneuver(1, LEFT, 0, 0, -90, "Oak Ave", 800));
+@@ -160,7 +222,7 @@ public final class CpTurnsTest {
+ 
+         t.maneuver(msg(0, U16, i(1), 1, U16, i(0), 5, U32, i(250)));
+         t.routeGuidance(msg(0, U16, i(1), 11, STR, s("0.1"), 12, ENUM, i(MILES)));
+-        expect("maneuver update without optional angle retains its explicit right-turn direction",
++        expect("maneuver update without its exit angle (DiPO resets it): the same maneuver keeps its arrow, distance updated",
+                 "road [Main St]", "tbt 67 0 0.0 0.1 0 0 2 0 0", "2c 2 1 0 0 0 0 0 0 0", "sub 0.4 0 2 22 13 1 1 0.0 -1 0",
+                 "list {1 70 0 [Oak Ave] [] " + (800 / 1609f) + " 2} {2 72 0 [Pine St] [] " + (2000 / 1609f) + " 2}");
+         t.maneuver(maneuver(0, RIGHT, 0, 0, 90, "Main St", 250));
+@@ -185,7 +247,8 @@ public final class CpTurnsTest {
+ 
+         t.routeGuidance(msg(0, U16, i(1), 19, STR, s("Waze"), 5, U64, l(0)));
+         check("source change: route guidance restarted", restarted.await(2, TimeUnit.SECONDS));
+-        expect("source change (Maps to Waze): HUD cleared; the reset state is 0 until the phone resends it, so cleared again",
++        expect("source change (Maps to Waze): cluster turn and HUD cleared; the reset state is 0 until the phone resends it, so the HUD again",
++                "tbt 0 0 0.0 0.0 -1 0 0 0 -1", "sub 0.0 -1 0 0 0 0 0 0.0 -1 0",
+                 "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
+ 
+         t.maneuver(maneuver(5, ARRIVE, 0, 0, 0, "Home Rd", 100));
+@@ -195,10 +258,14 @@ public final class CpTurnsTest {
+                 "2c 3 0 300 0 0 0 0 0 0");
+ 
+         t.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(2)));
+-        expect("arrived (state 2): icon 3, no HUD list for it", "road [Home Rd]", "tbt 3 0 0.0 300.0 0 0 3 0 0", "2c 3 0 300 0 0 0 0 0 0");
++        expect("arrived (state 2): icon 3, no HUD list for it, so the last turn's list is blanked",
++                "road [Home Rd]", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2", "tbt 3 0 0.0 300.0 0 0 3 0 0", "2c 3 0 300 0 0 0 0 0 0");
+ 
+         t.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(0)));
+-        expect("state 0: HUD cleared", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++        expect("state 0: cluster turn, trip and HUD cleared, and the destination name", "tbt 0 0 0.0 0.0 -1 0 0 0 -1",
++                "sub 0.0 -1 0 0 0 0 0 0.0 -1 0", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2", "dest 0 []");
++        check("route off at state 0 (a source change in between turned it off and on): " + routes, routes.toString().equals("on off on off "));
++        routes.setLength(0);
+ 
+         t.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(1)));
+         t.stop();
+@@ -208,6 +275,7 @@ public final class CpTurnsTest {
+ 
+         t.disconnected();
+         expect("iAP2 session ended: HUD cleared", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++        check("a route again, then stop and the session end: on, then off once: " + routes, routes.toString().equals("on off "));
+         t.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(1), 11, STR, s("0.5"), 12, ENUM, i(MILES), 13, U16, i(5), 19, STR, s("Maps")));
+         expect("after the session ended: maneuvers gone, a new source isn't a change", "");
+         c.calls.clear();
+@@ -224,9 +292,50 @@ public final class CpTurnsTest {
+                 "road [Any Rd]", "tbt 65 0 0.0 0.4 0 0 2 0 0", "2c 2 4 0 0 0 0 0 0 0");
+ 
+         t.routeGuidance(msg(0, U16, i(0), 1, ENUM, i(1), 11, STR, s("0.4"), 13, U16, i(0)));
+-        expect("component 0's first update: DiPO starts it empty (state 0), so the HUD is cleared",
++        expect("component 0's first update: DiPO starts it empty (state 0), so the cluster turn and HUD are cleared",
++                "tbt 0 0 0.0 0.0 -1 0 0 0 -1", "sub 0.0 -1 0 0 0 0 0 0.0 -1 0", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++
++        // a fresh route: maneuvers the icon table doesn't have never leave the last turn's arrow up
++        CpTurns g = new CpTurns(new android.content.Context(), c, null);
++        g.noIcon = "clear";
++        g.maneuver(maneuver(0, RIGHT, 0, 0, 90, "First St", 100));
++        g.maneuver(maneuver(1, LEFT, 0, 1, -45, "Circle", 400));
++        g.maneuver(maneuver(2, 99, 0, 0, 0, "Ramp", 900));
++        g.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(1), 11, STR, s("0.1"), 12, ENUM, i(MILES), 13, U16, i(0)));
++        c.calls.clear();
++        g.routeGuidance(msg(0, U16, i(1), 11, STR, s("0.3"), 13, U16, i(1)));
++        expect("next maneuver with no icon in the table (left, roundabout, -45): the slight-left exit (107), not the last right",
++                "road [Circle]", "tbt 107 0 0.0 0.3 0 0 2 0 0", "hud f2016b0000" + utf16("Circle"), "2c 2 3 0 0 0 0 0 0 0");
++        g.routeGuidance(msg(0, U16, i(1), 11, STR, s("0.5"), 13, U16, i(2)));
++        expect("clear: a maneuver with no icon at all (an unknown type 99): ours cleared off the cluster, HUD blanked",
++                "road [Ramp]", "tbt 0 0 0.0 0.0 -1 0 0 0 -1", "sub 0.0 -1 0 0 0 0 0 0.0 -1 0", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++        g.routeGuidance(msg(0, U16, i(1), 11, STR, s("0.4"), 13, U16, i(2)));
++        expect("still no arrow: nothing cleared again", "road [Ramp]");
++        g.routeGuidance(msg(0, U16, i(1), 11, STR, s("0.2"), 13, U16, i(0)));
++        expect("a turn with an arrow after it: shown again", "road [First St]", "tbt 67 0 0.0 0.2 0 0 2 0 0", "hud f201430000" + utf16("First St"), "2c 2 2 0 0 0 0 0 0 0");
++        g.disconnected();
++        expect("session ended with a turn up: cluster turn, trip and HUD cleared",
++                "tbt 0 0 0.0 0.0 -1 0 0 0 -1", "sub 0.0 -1 0 0 0 0 0 0.0 -1 0", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
++        g.stop();
++        expect("stopped with nothing of ours up: the car's own turn is left alone (HUD only)",
+                 "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2");
+ 
++        // the other tbt_no_icon choices
++        for (String mode : new String[] {"skip", "no_info", "straight"}) {
++            CpTurns h = new CpTurns(new android.content.Context(), c, null);
++            if (!mode.equals("straight")) h.noIcon = mode;
++            h.maneuver(maneuver(0, RIGHT, 0, 0, 90, "First St", 100));
++            h.maneuver(maneuver(1, 99, 0, 0, 0, "Ramp", 900));
++            h.routeGuidance(msg(0, U16, i(1), 1, ENUM, i(1), 11, STR, s("0.1"), 12, ENUM, i(MILES), 13, U16, i(0)));
++            c.calls.clear();
++            h.routeGuidance(msg(0, U16, i(1), 11, STR, s("0.5"), 13, U16, i(1)));
++            if (mode.equals("skip")) expect("skip (2.1.0): nothing sent, the last arrow stays", "road [Ramp]");
++            else if (mode.equals("no_info")) expect("no_info (nlw.1): icon 1, HUD list blanked once",
++                    "road [Ramp]", "2c 0 0 0 0 0 0 0 0 0", "lanes f1", "hud f2", "hud f2", "tbt 1 0 0.0 0.5 0 0 2 0 0", "2c 2 5 0 0 0 0 0 0 0");
++            else expect("straight (default): a straight arrow, the distance stays",
++                    "road [Ramp]", "tbt 65 0 0.0 0.5 0 0 2 0 0", "hud f201410000" + utf16("Ramp"), "2c 2 5 0 0 0 0 0 0 0");
++        }
++
+         check("icons: sharp left 69, slight right 66, roundabout exit 96/97, U-turn left-hand traffic 73",
+                 CpTurns.icon(1, 0, 0, -120, 1) == 69 && CpTurns.icon(2, 0, 0, 60, 1) == 66 && CpTurns.icon(2, 0, 1, 0, 1) == 96
+                         && CpTurns.icon(31, 1, 1, 0, 1) == 96 && CpTurns.icon(4, 1, 0, 0, 1) == 73 && CpTurns.icon(47, 0, 0, -140, 1) == 69
+@@ -235,6 +344,7 @@ public final class CpTurnsTest {
+                 CpTurns.laneIcon(0) == 1 && CpTurns.laneIcon(90) == 3 && CpTurns.laneIcon(-45) == 8 && CpTurns.laneIcon(180) == 5
+                         && CpTurns.laneIcon(270) == 7);
+         indiaTurns();
++        driveTurns();
+         System.exit(fail);
+     }
+ }
+diff --git a/wireless-carplay-aa/tools/picture/test.sh b/wireless-carplay-aa/tools/picture/test.sh
+new file mode 100755
+index 0000000..9cfd596
+--- /dev/null
++++ b/wireless-carplay-aa/tools/picture/test.sh
+@@ -0,0 +1,8 @@
++#!/bin/sh
++# Host test of the Wireless mod's CarPlay picture recovery policy (dipo/Keyframes):
++# when a key frame is asked for, and how often at most.
++set -e
++cd "$(dirname "$0")"
++CP=$(mktemp -d); trap 'rm -rf "$CP"' EXIT
++javac --release 8 -Xlint:-options -nowarn -d "$CP" $(find test -name '*.java') ../../src/hmgapi/mods/wireless/dipo/Keyframes.java
++java -cp "$CP" hmgapi.mods.wireless.dipo.KeyframesTest
+diff --git a/wireless-carplay-aa/tools/picture/test/hmgapi/mods/wireless/dipo/KeyframesTest.java b/wireless-carplay-aa/tools/picture/test/hmgapi/mods/wireless/dipo/KeyframesTest.java
+new file mode 100644
+index 0000000..9fbc51d
+--- /dev/null
++++ b/wireless-carplay-aa/tools/picture/test/hmgapi/mods/wireless/dipo/KeyframesTest.java
+@@ -0,0 +1,80 @@
++package hmgapi.mods.wireless.dipo;
++
++/**
++ * Host test of Keyframes: a wired and a wireless CarPlay session, with decoder
++ * failures, screen timeouts and the periodic tick, on a made-up clock.
++ */
++public final class KeyframesTest {
++    static int fail;
++
++    static void check(String what, boolean ok) {
++        System.out.println((ok ? "ok    " : "FAIL  ") + what);
++        if (!ok) fail = 1;
++    }
++
++    public static void main(String[] a) {
++        Keyframes k = new Keyframes(true);
++
++        // before onSessionStarted is seen (a session already up): failures still count
++        check("failure before a session: key frame", k.decodeFailure(Keyframes.NO_OUTPUT, 1000));
++        check("no periodic tick without a session", !k.ticking() && !k.tick(60000));
++
++        // wired session: reactive only
++        k.sessionStarted(0);
++        check("wired: no periodic tick", !k.ticking() && !k.tick(100000));
++        check("wired: no output frame -> key frame", k.decodeFailure(Keyframes.NO_OUTPUT, 100000));
++        check("wired: another within 2 s -> none", !k.decodeFailure(Keyframes.NO_OUTPUT, 101999));
++        check("wired: failures counted while rate-limited", k.failures == 2);
++        check("wired: 2 s later -> key frame", k.decodeFailure(Keyframes.SEQUENCE_HEADER, 102000));
++        check("type 0 (black-screen count reset) isn't a failure", !k.decodeFailure(0, 200000));
++        check("unknown type isn't a failure", !k.decodeFailure(7, 200000));
++        check("black screen -> key frame", k.decodeFailure(Keyframes.BLACK_SCREEN, 200000));
++        check("screen timeout -> key frame", k.screenTimeout(203000));
++        check("screen timeout within 2 s -> none", !k.screenTimeout(204000));
++        k.sessionEnded();
++
++        // wireless session: reactive plus a key frame at least every 10 s
++        k.sessionStarted(1);
++        check("wireless: ticking", k.ticking());
++        check("wireless: first tick due after a period", k.nextTick(300000) == Keyframes.PERIOD_MS);
++        check("wireless: tick -> key frame", k.tick(310000));
++        check("wireless: tick again 5 s later -> none", !k.tick(315000));
++        check("wireless: next tick 5 s after that", k.nextTick(315000) == 5000);
++        check("wireless: failure at 316 s -> key frame", k.decodeFailure(Keyframes.NO_OUTPUT, 316000));
++        check("wireless: tick at 320 s -> none (one 4 s ago)", !k.tick(320000));
++        check("wireless: tick at 326 s -> key frame", k.tick(326000));
++        check("next tick never sooner than the minimum gap", k.nextTick(335500) == Keyframes.MIN_GAP_MS);
++        k.sessionEnded();
++        check("session ended: no tick", !k.ticking() && !k.tick(400000));
++
++        // periodic off
++        Keyframes r = new Keyframes(false);
++        r.sessionStarted(1);
++        check("periodic off: wireless doesn't tick", !r.ticking() && !r.tick(50000));
++        check("periodic off: failures still recover", r.decodeFailure(Keyframes.NO_OUTPUT, 50000));
++
++        // a 5 s period (setting picture_period); never below the minimum gap
++        Keyframes f = new Keyframes(true, 5000);
++        f.sessionStarted(1);
++        check("5 s: first tick due after 5 s", f.nextTick(0) == 5000);
++        check("5 s: tick -> key frame", f.tick(5000));
++        check("5 s: tick 4 s later -> none", !f.tick(9000));
++        check("5 s: tick 5 s later -> key frame", f.tick(10000));
++        check("period below the gap is the gap", new Keyframes(true, 500).period == Keyframes.MIN_GAP_MS);
++
++        // the log's summary: counts by kind since the last one, then starts over
++        check("nothing yet: not eventful", !new Keyframes(true).eventful());
++        f.decodeFailure(Keyframes.BLACK_SCREEN, 20000);
++        f.decodeFailure(Keyframes.BLACK_SCREEN, 20500);
++        f.decodeFailure(0, 20600);
++        f.screenTimeout(30000);
++        String s = f.summary();
++        check("summary: periodic count", s.contains("asked 2 periodic"));
++        check("summary: one after a failure, one inside the gap", s.contains("1 after a decoder failure") && s.contains("1 inside the 2 s gap"));
++        check("summary: failures by type and resets", s.contains("2 black screen (1 resets)"));
++        check("summary: screen timeout", s.contains("1 after a screen timeout") && s.contains("screen timeouts 1"));
++        check("summary starts over", !f.eventful() && f.summary().contains("asked 0 periodic"));
++
++        System.exit(fail);
++    }
++}
