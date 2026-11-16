@@ -8,6 +8,9 @@ working copies of the four upstream HMG-API mods:
        rotary/stale-arrow fixes, post-route Compass replay (NO Watchdog).
      - PR #2: dipo.carplay.disable_bluetooth hook to keep BT alive on wireless CP.
      - PR #28: opt-in wifi_direct part (off by default).
+     - Projection Focus Arbitrator (FocusGuard / FocusPolicy): guarantees Phone
+       Projection wins all startup and session audio/mode/UI focus conflicts
+       against Bluetooth Audio while preserving FM/AM/SiriusXM Radio and cameras.
      - leafiaaac.c hardening: atomic thread-safe codec loading + LPCM
        bitsPerChannel==0 / bytesPerFrame==0 normalization + host unit tests.
      - US Ioniq 5 support across NEEV, NEEV23, NEEV23SE on 260507 and 260903,
@@ -24,6 +27,7 @@ working copies of the four upstream HMG-API mods:
 import argparse
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -117,9 +121,11 @@ def patch_wireless(repo: Path) -> None:
     pts["dipo.carplay.decode_failure"] = "observe"
     pts["dipo.carplay.screen_timeout"] = "observe"
     pts["dipo.carplay.disable_bluetooth"] = "replace"
+    pts["gpm.sensor_source.init"] = "observe"
+    pts["gpm.receiver_service.disconnected"] = "observe"
     write_json(mod_path, mod)
 
-    # Update settings.json (PR #16 picture + tbt_no_icon, PR #28 wifi_direct, NO bridge_watchdog)
+    # Update settings.json (PR #16 picture + tbt_no_icon, PR #28 wifi_direct, projection_focus, NO bridge_watchdog)
     settings_path = repo / "wireless-carplay-aa/settings.json"
     sdata = json.loads(settings_path.read_text(encoding="utf-8"))
     new_settings = []
@@ -151,6 +157,18 @@ def patch_wireless(repo: Path) -> None:
         elif item["key"] == "audio":
             new_settings.extend(
                 [
+                    {
+                        "key": "projection_focus",
+                        "type": "toggle",
+                        "default": True,
+                        "title": "Phone Projection wins focus conflicts with Bluetooth Audio",
+                        "apply": "restart",
+                        "description": (
+                            "Prevents Bluetooth Audio from stealing audio, mode, or screen focus while "
+                            "Wireless CarPlay or Android Auto is connecting or active, and reclaims focus "
+                            "if Bluetooth Audio grabbed it earlier during head-unit startup."
+                        ),
+                    },
                     {
                         "key": "picture",
                         "type": "toggle",
@@ -580,6 +598,327 @@ ${CC:-clang} -O2 -Wall -Wextra -Werror "$HERE/leafiaaac_test.c" -lpthread -o "$T
         encoding="utf-8",
     )
     leafia_test_sh.chmod(leafia_test_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    # Install FocusPolicy + FocusGuard and wire Projection vs Bluetooth Audio focus arbitration
+    focus_src_dir = PATCH_DIR / "wireless-focus"
+    mod_wireless_dir = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless"
+    shutil.copy2(focus_src_dir / "FocusPolicy.java", mod_wireless_dir / "FocusPolicy.java")
+    shutil.copy2(focus_src_dir / "FocusGuard.java", mod_wireless_dir / "FocusGuard.java")
+
+    # Wire Wireless.java (btaudio.ui + GPM hooks + DIPO entry condition)
+    wireless_java = mod_wireless_dir / "Wireless.java"
+    wsrc = wireless_java.read_text(encoding="utf-8")
+    old_app_loaded = """    @Override
+    public void appLoaded(final ModContext mod, LoadedApp app) {
+        if (NAVIGATION.equals(app.packageName)) navigation(mod, app);
+        if (IAP2.equals(app.packageName)) iap2(mod, app);
+        if (GPM.equals(app.packageName) && mod.settingBoolean("usb_drives", true)) usbDrives(mod, app);
+        if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
+        if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
+        if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true))) dipo(mod, app);
+    }"""
+    new_app_loaded = """    static final String BTAUDIO = "com.daudio.av.app.btaudio.ui";
+
+    @Override
+    public void appLoaded(final ModContext mod, LoadedApp app) {
+        if (NAVIGATION.equals(app.packageName)) navigation(mod, app);
+        if (IAP2.equals(app.packageName)) iap2(mod, app);
+        if (BTAUDIO.equals(app.packageName) && mod.settingBoolean("projection_focus", true)) FocusGuard.btAudio(mod, app);
+        if (GPM.equals(app.packageName) && (mod.settingBoolean("usb_drives", true) || mod.settingBoolean("projection_focus", true))) usbDrives(mod, app);
+        if (GPM.equals(app.packageName) && mod.settingBoolean("projection_focus", true)) FocusGuard.gpm(mod, app);
+        if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
+        if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
+        if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true) || mod.settingBoolean("projection_focus", true))) dipo(mod, app);
+    }"""
+    old_usb_drives = """    private void usbDrives(final ModContext mod, LoadedApp app) {
+        mod.hook(null, "framework.context_impl.start_service", new MethodHook() {
+            @Override
+            protected void beforeHookedMethod(Param p) {
+                Intent i = (Intent) p.args[0];
+                ComponentName c = i == null ? null : i.getComponent();
+                if (c == null || !GAL_SERVICE.equals(c.getClassName()) || i.getIntExtra("startMode", -1) != 1) return;
+                UsbDevice d = i.getParcelableExtra("device");
+                if (!notPhone(d)) return;
+                p.setResult(null);
+                mod.log("USB drive or hub (" + d.getDeviceName() + "), not starting wired Android Auto");
+            }
+        });
+        mod.log("USB drive hook in " + app.processName);
+    }"""
+    new_usb_drives = """    private void usbDrives(final ModContext mod, final LoadedApp app) {
+        mod.hook(null, "framework.context_impl.start_service", new MethodHook() {
+            @Override
+            protected void beforeHookedMethod(Param p) {
+                Intent i = (Intent) p.args[0];
+                ComponentName c = i == null ? null : i.getComponent();
+                if (c == null || !GAL_SERVICE.equals(c.getClassName())) return;
+                int startMode = i.getIntExtra("startMode", -1);
+                if (startMode == 1 && mod.settingBoolean("usb_drives", true)) {
+                    UsbDevice d = i.getParcelableExtra("device");
+                    if (notPhone(d)) {
+                        p.setResult(null);
+                        mod.log("USB drive or hub (" + d.getDeviceName() + "), not starting wired Android Auto");
+                        return;
+                    }
+                }
+                if (startMode > 0 && mod.settingBoolean("projection_focus", true)) {
+                    FocusGuard.onAaConnecting(mod, app.context);
+                }
+            }
+        });
+        if (mod.settingBoolean("usb_drives", true)) mod.log("USB drive hook in " + app.processName);
+    }"""
+    assert old_app_loaded in wsrc, "Expected Wireless.appLoaded block not found"
+    assert old_usb_drives in wsrc, "Expected Wireless.usbDrives block not found"
+    wireless_java.write_text(
+        wsrc.replace(old_app_loaded, new_app_loaded, 1).replace(old_usb_drives, new_usb_drives, 1),
+        encoding="utf-8",
+    )
+
+    # Wire Dipo.java (self-contained inside hmgapi.mods.wireless.dipo for Dalvik appPart isolation)
+    dsrc = dipo_java.read_text(encoding="utf-8")
+    old_dipo_start = """        if (tbt) turnByTurn();
+        if (bridge) bridge();
+        if (!tbt && !bridge) return;"""
+    new_dipo_start = """        if (m.settingBoolean("projection_focus", true)) {
+            try {
+                focus();
+            } catch (Throwable t) {
+                error("CarPlay focus: off", t);
+            }
+        }
+        if (tbt) turnByTurn();
+        if (bridge) bridge();
+        if (!tbt && !bridge) return;"""
+    old_dipo_tail = """            }
+        }, new IntentFilter(CP_FIRST_CONNECTED));
+    }
+}"""
+    new_dipo_tail = """            }
+        }, new IntentFilter(CP_FIRST_CONNECTED));
+    }
+
+    static final String PROJECTION_FOCUS = "hmgapi.mods.wireless.PROJECTION_FOCUS";
+    static final String BTAUDIO = "com.daudio.av.app.btaudio.ui";
+    static final String DIPO_SHORTCUT = "com.hkmc.intent.action.DIPO_CUSTOM_SHORTCUT";
+    static final int MODE_BT_AUDIO = 54, MICOM_BT_AUDIO = 14, MAX_CP_CAMERA_RETRIES = 12;
+    static final Object FOCUS_TOKEN = new Object();
+    static volatile boolean cpSessionUp;
+    static Handler focusHandler;
+    static long lastCpReclaimAt = -1500L;
+
+    static boolean focusActive() {
+        return mod != null && app != null && app.context != null
+                && mod.enabled() && mod.settingBoolean("projection_focus", true);
+    }
+
+    static void tellBtFocus(String state) {
+        if (!focusActive() || ("connecting".equals(state) && cpSessionUp)) return;
+        try {
+            Intent i = new Intent(PROJECTION_FOCUS);
+            i.setPackage(BTAUDIO);
+            i.addFlags(Intent.FLAG_RECEIVER_FOREGROUND | Intent.FLAG_INCLUDE_STOPPED_PACKAGES);
+            i.putExtra("source", "cp");
+            i.putExtra("state", state);
+            app.context.sendBroadcast(i);
+        } catch (Throwable t) {
+            error("CarPlay focus broadcast (" + state + ")", t);
+        }
+    }
+
+    private static void focus() {
+        final ClassLoader cl = app.classLoader;
+        for (String id : new String[] { "dipo.carplay.session_created", "dipo.carplay.session_started", "dipo.carplay.session_finalized" }) {
+            if (!Points.has(id)) {
+                log("CarPlay focus: off on this car (" + id + " not mapped)");
+                return;
+            }
+        }
+        focusHandler = new Handler(android.os.Looper.getMainLooper());
+        mod.hook(cl, "dipo.carplay.session_created", new MethodHook() {
+            @Override
+            protected void afterHookedMethod(Param p) {
+                tellBtFocus("connecting");
+            }
+        });
+        mod.hook(cl, "dipo.carplay.session_started", new MethodHook() {
+            @Override
+            protected void afterHookedMethod(Param p) {
+                cpSessionUp = true;
+                if (!focusActive()) return;
+                tellBtFocus("connected");
+                scheduleCpReclaim(450L, 0);
+                scheduleCpReclaim(2050L, 0);
+            }
+        });
+        mod.hook(cl, "dipo.carplay.session_finalized", new MethodHook() {
+            @Override
+            protected void afterHookedMethod(Param p) {
+                cpSessionUp = false;
+                if (focusHandler != null) focusHandler.removeCallbacksAndMessages(FOCUS_TOKEN);
+                tellBtFocus("disconnected");
+            }
+        });
+        log("CarPlay focus: projection focus arbitrator active in DiPO");
+    }
+
+    static void scheduleCpReclaim(long delayMs, final int attempt) {
+        final Handler h = focusHandler;
+        if (h == null) return;
+        Runnable r = new Runnable() {
+            @Override
+            public void run() {
+                if (!cpSessionUp || !focusActive()) return;
+                Context c = app.context;
+                int mode = cpCurrentMode(c);
+                int audio = cpMicomAudioMode(c);
+                String top = cpTopPackage(c);
+                boolean btHolding = BTAUDIO.equals(top) || mode == MODE_BT_AUDIO || audio == MICOM_BT_AUDIO;
+                if (!btHolding) return;
+                if (cpCameraForeground(top)) {
+                    if (attempt < MAX_CP_CAMERA_RETRIES) scheduleCpReclaim(1000L, attempt + 1);
+                    return;
+                }
+                long t = android.os.SystemClock.elapsedRealtime();
+                if (t - lastCpReclaimAt < 1500L) return;
+                lastCpReclaimAt = t;
+                try {
+                    c.sendBroadcast(new Intent(DIPO_SHORTCUT));
+                    log("CarPlay focus: reclaimed focus from Bluetooth Audio (mode=" + mode + ", audio=" + audio + ", top=" + top + ")");
+                } catch (Throwable x) {
+                    error("CarPlay focus reclaim", x);
+                }
+            }
+        };
+        h.postAtTime(r, FOCUS_TOKEN, android.os.SystemClock.uptimeMillis() + Math.max(0L, delayMs));
+    }
+
+    static boolean cpCameraForeground(String pkg) {
+        if (pkg == null) return false;
+        String v = pkg.toLowerCase(java.util.Locale.US);
+        return v.contains("rearcamera") || v.contains(".camera") || v.contains(".avm") || v.contains("surroundview");
+    }
+
+    static int cpCurrentMode(Context c) {
+        if (c == null) return -1;
+        try {
+            Class<?> cls = Class.forName("com.hkmc.mode.ModeManager");
+            Object mm = cls.getConstructor(Context.class).newInstance(c);
+            return (Integer) cls.getMethod("getCurrentMode").invoke(mm);
+        } catch (Throwable ignored) {}
+        try {
+            IBinder b = (IBinder) Class.forName("android.os.ServiceManager")
+                    .getMethod("getService", String.class).invoke(null, "com.hkmc.micom.mode");
+            if (b == null) return -1;
+            Object svc = Class.forName("com.hkmc.mode.IModeManager$Stub")
+                    .getMethod("asInterface", IBinder.class).invoke(null, b);
+            return (Integer) Class.forName("com.hkmc.mode.IModeManager")
+                    .getMethod("getCurrentMode").invoke(svc);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    static int cpMicomAudioMode(Context c) {
+        if (c == null) return -1;
+        try {
+            Class<?> cls = Class.forName("com.hkmc.media.MicomAudioManager");
+            Object mam = cls.getConstructor(Context.class).newInstance(c);
+            return (Integer) cls.getMethod("getAudioMode").invoke(mam);
+        } catch (Throwable t) {
+            return -1;
+        }
+    }
+
+    static String cpTopPackage(Context c) {
+        if (c == null) return null;
+        try {
+            android.app.ActivityManager am = (android.app.ActivityManager) c.getSystemService(Context.ACTIVITY_SERVICE);
+            if (am == null) return null;
+            java.util.List<android.app.ActivityManager.RunningTaskInfo> tasks = am.getRunningTasks(1);
+            if (tasks == null || tasks.isEmpty() || tasks.get(0).topActivity == null) return null;
+            return tasks.get(0).topActivity.getPackageName();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+}"""
+    assert old_dipo_start in dsrc, "Expected Dipo.start block not found"
+    assert old_dipo_tail in dsrc, "Expected Dipo tail block not found"
+    dipo_java.write_text(
+        dsrc.replace(old_dipo_start, new_dipo_start, 1).replace(old_dipo_tail, new_dipo_tail, 1),
+        encoding="utf-8",
+    )
+
+    # Wire Bridge.java (notify Dipo.tellBtFocus during wireless CarPlay SPP handshake, skip post-disconnect onUsbGone)
+    bridge_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Bridge.java"
+    bsrc = bridge_java.read_text(encoding="utf-8")
+    old_spp_sched = """    static void scheduleSppConnect(final String addr) {
+        if (addr == null || !enabled() || sUsb || sSession || sCpWireless) return;
+        handler().postDelayed(new Runnable() {"""
+    new_spp_sched = """    static void scheduleSppConnect(final String addr) {
+        if (addr == null || !enabled() || sUsb || sSession || sCpWireless) return;
+        Dipo.tellBtFocus("connecting");
+        handler().postDelayed(new Runnable() {"""
+    old_spp_up = """    static void onSppUp(final String addr) {
+        if (addr == null || sSession) return;
+        sAddr = addr;
+        if (sCpClient || sCpWireless || !enabled() || sUsb) return;
+        sSession = true;
+        handler().post(new Runnable() {"""
+    new_spp_up = """    static void onSppUp(String addr) {
+        onSppUp(addr, true);
+    }
+
+    static void onSppUp(final String addr, boolean notifyFocus) {
+        if (addr == null || sSession) return;
+        sAddr = addr;
+        if (sCpClient || sCpWireless || !enabled() || sUsb) return;
+        sSession = true;
+        if (notifyFocus) Dipo.tellBtFocus("connecting");
+        handler().post(new Runnable() {"""
+    old_usb_gone_call = "if (m != null && !sUsb && !sSession && addr.equals(sAddr) && m.IbtcmIsSppConnectedDevice(addr)) onSppUp(addr);"
+    new_usb_gone_call = "if (m != null && !sUsb && !sSession && addr.equals(sAddr) && m.IbtcmIsSppConnectedDevice(addr)) onSppUp(addr, false);"
+    old_spp_down = """        sAddr = null;
+        if (sSession) {
+            sSession = false;
+            sendDetach();
+        }"""
+    new_spp_down = """        sAddr = null;
+        Dipo.tellBtFocus("aborted");
+        if (sSession) {
+            sSession = false;
+            sendDetach();
+        }"""
+    assert old_spp_sched in bsrc, "Expected Bridge.scheduleSppConnect block not found"
+    assert old_spp_up in bsrc, "Expected Bridge.onSppUp block not found"
+    assert old_usb_gone_call in bsrc, "Expected Bridge.onUsbGone call not found"
+    assert old_spp_down in bsrc, "Expected Bridge.onSppDown block not found"
+    bridge_java.write_text(
+        bsrc.replace(old_spp_sched, new_spp_sched, 1)
+        .replace(old_spp_up, new_spp_up, 1)
+        .replace(old_usb_gone_call, new_usb_gone_call, 1)
+        .replace(old_spp_down, new_spp_down, 1),
+        encoding="utf-8",
+    )
+
+    # Install host unit test for FocusPolicy (tools/focus/test.sh)
+    focus_test_dir = repo / "wireless-carplay-aa/tools/focus/test/hmgapi/mods/wireless"
+    focus_test_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(focus_src_dir / "FocusPolicyTest.java", focus_test_dir / "FocusPolicyTest.java")
+    focus_test_sh = repo / "wireless-carplay-aa/tools/focus/test.sh"
+    focus_test_sh.write_text(
+        """#!/bin/sh
+# Host unit test of the Wireless mod's Projection vs Bluetooth Audio focus policy (FocusPolicy).
+set -e
+cd "$(dirname "$0")"
+CP=$(mktemp -d); trap 'rm -rf "$CP"' EXIT
+javac --release 8 -Xlint:-options -nowarn -d "$CP" $(find test -name '*.java') ../../src/hmgapi/mods/wireless/FocusPolicy.java
+java -cp "$CP" hmgapi.mods.wireless.FocusPolicyTest
+""",
+        encoding="utf-8",
+    )
+    focus_test_sh.chmod(focus_test_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
     # Update wireless-carplay-aa/test.sh expected NEMESIS depends string
     test_sh = repo / "wireless-carplay-aa/test.sh"

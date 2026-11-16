@@ -289,7 +289,7 @@ published=${TODAY}
 [package.1]
 path=packages/hmgapi.wireless-carplay-aa.zip
 name=Wireless CarPlay + Android Auto (2.2.1)
-short-desc=Wireless CP/AA, cluster/HUD TBT, freeze recovery, audio hardening
+short-desc=Wireless CP/AA, cluster/HUD TBT, BT focus guard, freeze & audio fixes
 published=${TODAY}
 
 [package.2]

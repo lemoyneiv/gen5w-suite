@@ -11,7 +11,7 @@ Every mod in this suite is signed with a single trusted author key (`28ad71e0-07
 | Order | Component | Version | Key Customizations & Fixes |
 |---:|---|---|---|
 | Core | **[`lemoyneiv/HMG-API`](https://github.com/lemoyneiv/HMG-API)** | `1.1.1-rc.1` | Preserves BLE Central/GATT + coexistence filter + 100 ms `speed` refresh; merges upstream `1.1.0-rc.1` (`NEEV23`/`CEEV` `260903` maps); fixes `VehicleHub` `-40 °F` DATC wake sentinel & QuickBoot STR re-registration, `conditioning` route timeout window (`<= 18 min`), and `+2.5 s` Park welcome-notice confirmation |
-| `01` | **`wireless-carplay-aa`** | `2.2.1` | Integrates PR `#2` (`dipo.carplay.disable_bluetooth`), PR `#16` subset (`Keyframes` CarPlay freeze IDR recovery + `CpTurns` highway/rotary/stale-arrow fixes + post-route Compass replay, **without** `Watchdog`), PR `#28` (`wifi_direct` opt-in toggle), `leafiaaac.c` thread-safe codec load + LPCM `bitsPerChannel==0` normalization, and `260903` + `NEEV23SE` support |
+| `01` | **`wireless-carplay-aa`** | `2.2.1` | Integrates PR `#2` (`dipo.carplay.disable_bluetooth`), **Projection Focus Arbitrator (`FocusGuard` / `FocusPolicy`)** so Wireless CarPlay & Android Auto always win startup and session focus conflicts against Bluetooth Audio, PR `#16` subset (`Keyframes` CarPlay freeze IDR recovery + `CpTurns` highway/rotary/stale-arrow fixes + post-route Compass replay, **without** `Watchdog`), PR `#28` (`wifi_direct` opt-in toggle), `leafiaaac.c` thread-safe codec load + LPCM `bitsPerChannel==0` normalization, and `260903` + `NEEV23SE` support |
 | `02` | **`adb`** | `1.0.1` | Safe out-of-box defaults (`usb: false`, `tcp: false`) so USB flash drives and wired CarPlay/Android Auto keep working immediately after install while turning off the Engineering Mode `eth0` subnet conflict |
 | `03` | **`aa-dpi`** | `0.3.0` | Upgraded to `eliotwass/hmg-aa-dpi` `0.3.0`: target **200 DPI**, **tap/scroll limit off** (`tap_limit: false`), **60 fps** video window (`video_window: 6`), `nemesis_conflicts: ["aa.dpi"]` |
 | `04` | **`egmp-aa-ev`** | `0.7.0` | Google Maps EV routing over Android Auto (live SoC, range, charge curves, automatic DC fast-charger battery preconditioning), `nemesis_conflicts: ["aa.ev.model"]` |
@@ -72,7 +72,7 @@ Assumes **NEMESIS (`>= 1.16`)** is already installed on the head unit:
 `build-suite.sh` runs:
 1. `patches/prepare-mods.py` on clean pinned checkouts of the upstream mods.
 2. Offline hook-point & floor checks (`check-points.py`) against the `1.1.1-rc.1` SDK catalogue.
-3. Unit & engine tests for every mod (`CpTurnsTest`, `AaTurnsTest`, `KeyframesTest`, `leafiaaac_test`, `adb/test.sh`, `DpiTest`, `PrecondTest`/`RelayTest`/`SocCurveTest`, `ComfortPolicyTest` + `hmgapi-comfort/test.sh`, `light-vibes` `test_lamp` + `ReportTest` + beat/preset DSP analysis).
+3. Unit & engine tests for every mod (`CpTurnsTest`, `AaTurnsTest`, `KeyframesTest`, `FocusPolicyTest`, `leafiaaac_test`, `adb/test.sh`, `DpiTest`, `PrecondTest`/`RelayTest`/`SocCurveTest`, `ComfortPolicyTest` + `hmgapi-comfort/test.sh`, `light-vibes` `test_lamp` + `ReportTest` + beat/preset DSP analysis).
 4. Gen5W KitKat toolbox shell verification (`check-scripts.sh`) on every head-unit script (`usb/NEMESIS.sh`, `open.sh`, `svc/start.sh`, `lights.sh`, `offload.sh`).
 5. Multi-mod integration verification (`tools/integration-test.sh`) installing and applying all 6 mods simultaneously on simulated US Ioniq 5 `260507` and `260903` units (`NEEV`, `NEEV23`, `NEEV23SE`), then verifying byte-identical stock restoration.
 
@@ -81,7 +81,8 @@ Assumes **NEMESIS (`>= 1.16`)** is already installed on the head unit:
 ## Repository Layout
 
 - [`build-suite.sh`](build-suite.sh) — Master build, test, signing, integration-test, and USB packaging script
-- [`patches/prepare-mods.py`](patches/prepare-mods.py) — Deterministic patcher for `wireless-carplay-aa`, `adb`, `aa-dpi`, and `egmp-aa-ev`
+- [`patches/prepare-mods.py`](patches/prepare-mods.py) — Deterministic patcher for `wireless-carplay-aa`, `adb`, `aa-dpi`, `egmp-aa-ev`, and `light-vibes`
+- [`patches/wireless-focus/`](patches/wireless-focus/) — Projection vs. Bluetooth Audio focus arbitrator (`FocusPolicy.java`, `FocusGuard.java`, `FocusPolicyTest.java`)
 - [`patches/wireless-pr16-no-watchdog.patch`](patches/wireless-pr16-no-watchdog.patch) — Extracted PR `#16` CarPlay freeze recovery + cluster TBT + compass restore (without `Watchdog`)
 - [`hmgapi-comfort/`](hmgapi-comfort/) — Source, tests, icons, and standalone builder for **Comfort & Startup (`hmgapi-comfort` `1.0.0`)**
 - [`usb/NEMESIS.data`](usb/NEMESIS.data), [`usb/NEMESIS.sh`](usb/NEMESIS.sh) — One-tap NEMESIS USB installer

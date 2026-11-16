@@ -114,7 +114,7 @@ PY
     check "$P: multi-mod plan succeeds with 0 problems" 0 "$rc"
     hasnt "$P: no mod refuses or fails to load hooks" "won't load" "$out"
     hasnt "$P: no hook conflicts" "conflict" "$out"
-    has "$P: gpm.sensor_source.init shared cleanly (aa-dpi + egmp-aa-ev)" "gpm.sensor_source.init: " "$out"
+    has "$P: gpm.sensor_source.init shared cleanly (aa-dpi + egmp-aa-ev + wireless)" "wireless-carplay-aa (observe)" "$out"
     has "$P: gpm.navigation_status.next_turn shared cleanly (wireless + egmp)" "gpm.navigation_status.next_turn: " "$out"
 
     # Apply across ALL mods in a single transaction
@@ -142,6 +142,17 @@ PY
 )
     check "$P: aa-dpi published defaults (dpi=200, tap_limit=False, video_window=6)" \
         "dpi=200 tap_limit=False video_window=6" "$AADPI_DEFAULTS"
+
+    WL_FOCUS=$(python3 - "$R/data/hmgapi/public/state.json" <<'PY'
+import json, sys
+s = json.load(open(sys.argv[1]))["mods"]["wireless-carplay-aa"]["settings"]
+if isinstance(s, list):
+    s = {x["key"]: x.get("value", x.get("default")) for x in s}
+print(f"projection_focus={s.get('projection_focus')}")
+PY
+)
+    check "$P: wireless-carplay-aa published default projection_focus=True" \
+        "projection_focus=True" "$WL_FOCUS"
 
     # Restore everything back to stock and verify byte-identical /system
     eng restore
