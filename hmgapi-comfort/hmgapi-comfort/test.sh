@@ -17,6 +17,9 @@ has "apk contains ComfortEngine" "Ldev/lemoyne/comfort/ComfortEngine;" "$DEX_STR
 has "apk contains ComfortPolicy" "Ldev/lemoyne/comfort/ComfortPolicy;" "$DEX_STRINGS"
 has "apk contains WelcomeDaemon" "Ldev/lemoyne/comfort/WelcomeDaemon;" "$DEX_STRINGS"
 has "apk contains MainActivity" "Ldev/lemoyne/comfort/MainActivity;" "$DEX_STRINGS"
+has "apk contains ComfortTheme" "Ldev/lemoyne/comfort/ComfortTheme;" "$DEX_STRINGS"
+has "apk contains ComfortIcons" "Ldev/lemoyne/comfort/ComfortIcons;" "$DEX_STRINGS"
+has "apk contains ComfortWidgets" "Ldev/lemoyne/comfort/ComfortWidgets;" "$DEX_STRINGS"
 has "apk contains BootReceiver" "Ldev/lemoyne/comfort/BootReceiver;" "$DEX_STRINGS"
 has "apk bundles HmgApi client" "Lhmgapi/client/HmgApi;" "$DEX_STRINGS"
 

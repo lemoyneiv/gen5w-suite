@@ -190,9 +190,10 @@ PY
 done
 
 if [ -d "$STANDALONE_DIR" ]; then
-    echo "== Standalone Comfort (1.0.1) & Light Vibes (0.6.9) package verification =="
+    CVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$HERE/hmgapi-comfort/hmgapi-comfort/mod.json")
+    echo "== Standalone Comfort (${CVER}) & Light Vibes (0.6.9) package verification =="
     for spec in \
-        "hmgapi-comfort:1.0.1" \
+        "hmgapi-comfort:${CVER}" \
         "light-vibes:0.6.9"
     do
         mid=${spec%:*}

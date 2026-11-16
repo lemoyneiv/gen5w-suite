@@ -7,7 +7,7 @@
 #   dist/gen5w-suite-usb.zip                 One-tap NEMESIS execute USB stick (recommended)
 #   dist/gen5w-suite-nemesis-store-usb.zip   Interactive NEMESIS USB Package Store stick (type=list)
 #   dist/gen5w-suite-hmgapi-updates-usb.zip  HMG-API Updates stick (HMGAPI/updates/*.zip)
-#   dist/standalone/*.zip                    Standalone Comfort (1.0.1) & Light Vibes (0.6.9) packages
+#   dist/standalone/*.zip                    Standalone Comfort (1.1.0) & Light Vibes (0.6.9) packages
 #   dist/mods/*.zip                          Individual signed HMG-API + NEMESIS packages
 #   dist/SHA256SUMS                          SHA-256 checksums
 set -e
@@ -188,18 +188,19 @@ echo "=================================================================="
     cp out/dist/egmp-aa-ev-0.7.0-nemesis-package.zip "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0-nemesis-package.zip"
 )
 
+CVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$SUITE_ROOT/hmgapi-comfort/hmgapi-comfort/mod.json")
 echo ""
 echo "=================================================================="
-echo " STEP 6: Building, Testing & Signing hmgapi-comfort 1.0.1"
+echo " STEP 6: Building, Testing & Signing hmgapi-comfort ${CVER}"
 echo "=================================================================="
 sh "$SUITE_ROOT/hmgapi-comfort/build.sh"
-cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.1.hmgapi.zip" "$SUITE_ROOT/dist/mods/"
-cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.1-nemesis-package.zip" "$SUITE_ROOT/dist/mods/"
+cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v${CVER}.hmgapi.zip" "$SUITE_ROOT/dist/mods/"
+cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v${CVER}-nemesis-package.zip" "$SUITE_ROOT/dist/mods/"
 for f in \
-    hmgapi-comfort-v1.0.1.hmgapi.zip \
-    hmgapi-comfort-v1.0.1-hmgapi-usb.zip \
-    hmgapi-comfort-v1.0.1-nemesis-usb.zip \
-    hmgapi-comfort-v1.0.1-nemesis-package.zip
+    "hmgapi-comfort-v${CVER}.hmgapi.zip" \
+    "hmgapi-comfort-v${CVER}-hmgapi-usb.zip" \
+    "hmgapi-comfort-v${CVER}-nemesis-usb.zip" \
+    "hmgapi-comfort-v${CVER}-nemesis-package.zip"
 do
     cp "$SUITE_ROOT/hmgapi-comfort/dist/$f" "$SUITE_ROOT/dist/standalone/$f"
 done
@@ -251,7 +252,7 @@ for d in "$STAGE_EXEC" "$STAGE_LIST" "$STAGE_UPD"; do
     cp "$SUITE_ROOT/dist/mods/adb-v1.0.1.hmgapi.zip"                 "$d/HMGAPI/updates/02-adb.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0.hmgapi.zip"              "$d/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0.hmgapi.zip"          "$d/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
-    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.1.hmgapi.zip"      "$d/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
+    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v${CVER}.hmgapi.zip"    "$d/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}.hmgapi.zip"      "$d/HMGAPI/updates/06-light-vibes.hmgapi.zip"
 done
 
@@ -262,7 +263,7 @@ for d in "$STAGE_EXEC" "$STAGE_LIST"; do
     cp "$SUITE_ROOT/dist/mods/adb-v1.0.1-nemesis-package.zip"                 "$d/packages/hmgapi.adb.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0-nemesis-package.zip"              "$d/packages/hmgapi.aa-dpi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0-nemesis-package.zip"          "$d/packages/hmgapi.egmp-aa-ev.zip"
-    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.1-nemesis-package.zip"      "$d/packages/hmgapi.hmgapi-comfort.zip"
+    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v${CVER}-nemesis-package.zip"    "$d/packages/hmgapi.hmgapi-comfort.zip"
     cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}-nemesis-package.zip"      "$d/packages/hmgapi.light-vibes.zip"
 done
 
@@ -310,7 +311,7 @@ published=${TODAY}
 
 [package.5]
 path=packages/hmgapi.hmgapi-comfort.zip
-name=Comfort & Startup (1.0.1)
+name=Comfort & Startup (${CVER})
 short-desc=Multi-tier auto seat/wheel heat + ventilation & instant welcome dismisser
 published=${TODAY}
 

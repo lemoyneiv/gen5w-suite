@@ -15,7 +15,7 @@ Every mod in this suite is signed with a single trusted author key (`28ad71e0-07
 | `02` | **`adb`** | `1.0.1` | `VysseCodes`, `lemoyneiv` | Rebased onto upstream `Open-HMG/hmgapi-adb` (`8d9dd39`); safe out-of-box defaults (`usb: false`, `tcp: false`) so USB flash drives and wired CarPlay/Android Auto keep working immediately after install while turning off the Engineering Mode `eth0` subnet conflict |
 | `03` | **`aa-dpi`** | `0.3.0` | `eliotwass`, `AwsomeFox`, `lemoyneiv` | Upgraded to `eliotwass/hmg-aa-dpi` `0.3.0`: target **200 DPI**, **tap/scroll limit off** (`tap_limit: false`), **60 fps** video window (`video_window: 6`), `nemesis_conflicts: ["aa.dpi"]` |
 | `04` | **`egmp-aa-ev`** | `0.7.0` | `willemcvu`, `AwsomeFox` *(stock)* | Google Maps EV routing over Android Auto (live SoC, range, charge curves, automatic DC fast-charger battery preconditioning), `nemesis_conflicts: ["aa.ev.model"]` |
-| `05` | **`hmgapi-comfort`** | `1.0.1` | `lemoyneiv` *(original)* | **Native HMG-API mod** replacing both `hkmc-coldstart-heat` and `hkmc-factory82`: dedicated `WelcomeDaemon` (`user=system, start=boot`) for sub-second cold-boot & QuickBoot STR welcome screen dismissal + 3-tier cold heating + 3-tier warm seat ventilation + independent wheel threshold + passenger policy + 60 s post-wake fresh ambient temperature wait + widescreen Gen5W dashboard app with **Home Screen Tiles…** shortcut |
+| `05` | **`hmgapi-comfort`** | `1.1.0` | `lemoyneiv` *(original)* | **Native HMG-API mod** replacing both `hkmc-coldstart-heat` and `hkmc-factory82`: dedicated `WelcomeDaemon` (`user=system, start=boot`) for sub-second cold-boot & QuickBoot STR welcome screen dismissal + 3-tier cold heating + 3-tier warm seat ventilation + independent wheel threshold + passenger/rear policies + widescreen **Material 3** Day/Night control center with live cabin seat grid, seasonal spectrum bar, and **Home Screen Tiles** shortcut |
 | `06` | **[`light-vibes`](https://github.com/lemoyneiv/light-vibes/tree/intense-effects)** | `0.6.9` | `Kyle (dibble9012)`, `lemoyneiv` | **Intense Effects** branch: music- & speed-reactive Gen5W ambient lighting (`lightvibesd` static ARMv7 + `LightVibes.apk` Material 3 preset studio, USB-only LED testing & stock color capture, zero `/system` edits) |
 
 ---
@@ -69,11 +69,11 @@ Assumes **NEMESIS (`>= 1.16`)** is already installed on the head unit:
 
 ## Standalone Packages (`Comfort` & `Light Vibes`)
 
-For users who want only **Comfort & Startup (`hmgapi-comfort` `1.0.1`)** or **Light Vibes Intense Effects (`light-vibes` `0.6.9`)** on any head unit running **HMG-API `>= 1.0.0`** (including stock upstream `Open-HMG/HMG-API` without this suite's custom core), `./build-suite.sh` produces ready-to-share standalone archives in **`dist/standalone/`**:
+For users who want only **Comfort & Startup (`hmgapi-comfort` `1.1.0`)** or **Light Vibes Intense Effects (`light-vibes` `0.6.9`)** on any head unit running **HMG-API `>= 1.0.0`** (including stock upstream `Open-HMG/HMG-API` without this suite's custom core), `./build-suite.sh` produces ready-to-share standalone archives in **`dist/standalone/`**:
 
 | App | One-Tap NEMESIS USB Stick | HMG-API Updates USB Stick | Direct HMG-API / NEMESIS Store Package |
 |---|---|---|---|
-| **Comfort (`1.0.1`)** | `hmgapi-comfort-v1.0.1-nemesis-usb.zip` | `hmgapi-comfort-v1.0.1-hmgapi-usb.zip` | `hmgapi-comfort-v1.0.1.hmgapi.zip` / `-nemesis-package.zip` |
+| **Comfort (`1.1.0`)** | `hmgapi-comfort-v1.1.0-nemesis-usb.zip` | `hmgapi-comfort-v1.1.0-hmgapi-usb.zip` | `hmgapi-comfort-v1.1.0.hmgapi.zip` / `-nemesis-package.zip` |
 | **Light Vibes (`0.6.9`)** | `light-vibes-v0.6.9-nemesis-usb.zip` | `light-vibes-v0.6.9-hmgapi-usb.zip` | `light-vibes-v0.6.9.hmgapi.zip` / `-nemesis-package.zip` |
 
 - **Via NEMESIS USB**: Extract `*-nemesis-usb.zip` to the root of a FAT32 USB drive (`NEMESIS.data` and `packages/` at root), insert into the car's data USB port, and accept the NEMESIS install prompt.
@@ -114,7 +114,7 @@ For users who want only **Comfort & Startup (`hmgapi-comfort` `1.0.1`)** or **Li
 - [`patches/prepare-mods.py`](patches/prepare-mods.py) — Deterministic patcher for `wireless-carplay-aa`, `adb`, `aa-dpi`, `egmp-aa-ev`, and `light-vibes`
 - [`patches/wireless-focus/`](patches/wireless-focus/) — Projection vs. Bluetooth Audio focus arbitrator (`FocusPolicy.java`, `FocusGuard.java`, `FocusPolicyTest.java`)
 - [`patches/wireless-pr16-no-watchdog.patch`](patches/wireless-pr16-no-watchdog.patch) — Extracted PR `#16` CarPlay freeze recovery + cluster TBT + compass restore (without `Watchdog`)
-- [`hmgapi-comfort/`](hmgapi-comfort/) — Source, tests, icons, and standalone builder for **Comfort & Startup (`hmgapi-comfort` `1.0.1`)**
+- [`hmgapi-comfort/`](hmgapi-comfort/) — Source, tests, icons, and standalone builder for **Comfort & Startup (`hmgapi-comfort` `1.1.0`)**
 - [`usb/NEMESIS.data`](usb/NEMESIS.data), [`usb/NEMESIS.sh`](usb/NEMESIS.sh) — One-tap NEMESIS USB installer
 - [`tools/installer-test.sh`](tools/installer-test.sh) — Off-car unit test for Leafia/Evergreen precursor cleanup, `HmgApi.apk` fallback, `aa-dpi` settings migration, and KitKat shell verification
 - [`tools/integration-test.sh`](tools/integration-test.sh) — Multi-mod `260507` + `260903` integration, standalone mod verification, Home Screen Tile CLI, & stock-restore test suite
