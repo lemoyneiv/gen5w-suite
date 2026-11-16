@@ -1,26 +1,24 @@
 #!/bin/sh
 # Build, test, sign, integration-verify, and package the complete Gen5W Suite:
 #
-#   ./build-suite.sh                 build core + 6 mods + unified USB installers
-#   ./build-suite.sh --with-extras   also build & include ../brake-indicator-gen5w
+#   ./build-suite.sh    build core + 6 mods + unified USB installers + standalone Comfort & Light Vibes
 #
 # Outputs in dist/:
 #   dist/gen5w-suite-usb.zip                 One-tap NEMESIS execute USB stick (recommended)
 #   dist/gen5w-suite-nemesis-store-usb.zip   Interactive NEMESIS USB Package Store stick (type=list)
 #   dist/gen5w-suite-hmgapi-updates-usb.zip  HMG-API Updates stick (HMGAPI/updates/*.zip)
+#   dist/standalone/*.zip                    Standalone Comfort (1.0.1) & Light Vibes (0.6.9) packages
 #   dist/mods/*.zip                          Individual signed HMG-API + NEMESIS packages
 #   dist/SHA256SUMS                          SHA-256 checksums
 set -e
+umask 022
 cd "$(dirname "$0")"
 SUITE_ROOT=$PWD
 
-WITH_EXTRAS=0
-for arg in "$@"; do
-    case "$arg" in
-        --with-extras) WITH_EXTRAS=1 ;;
-        *) echo "usage: $0 [--with-extras]" >&2; exit 2 ;;
-    esac
-done
+if [ $# -gt 0 ]; then
+    echo "usage: $0" >&2
+    exit 2
+fi
 
 # 1. Locate Android SDK, HMG-API fork checkout, Mod SDK, and persistent signing keys
 if [ -z "${ANDROID_HOME:-}" ]; then
@@ -57,8 +55,8 @@ if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
 fi
 
 CORE_APP_KEY="$KEY_DIR/hmgapi-core-app.p12"
-if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.2-nemesis-package.zip" ]; then
-    echo "== Building HMG-API Core 1.1.1-rc.2 & Mod SDK =="
+if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.3-nemesis-package.zip" ]; then
+    echo "== Building HMG-API Core 1.1.1-rc.3 & Mod SDK =="
     (cd "$HMGAPI" && HMGAPI_KEY="$CORE_APP_KEY" ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
 fi
 HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
@@ -84,16 +82,16 @@ fetch_upstream() {
     fi
 }
 
-fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless-cp-aa.git 7fea56def357ec15f605bc6631554f11c3d578e4
+fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless-cp-aa.git 2af1849bee473d2ae8719b35acf06421e1c4a974
 fetch_upstream hmgapi-adb            https://github.com/Open-HMG/hmgapi-adb.git            8d9dd39872e87702f32f8cbb90896c63ac77d6bc
 fetch_upstream hmg-aa-dpi            https://github.com/eliotwass/hmg-aa-dpi.git           4222625d25e2776f926cf372ff3220fc3ec6d20c
 fetch_upstream egmp-aa-ev-hmg-api    https://github.com/AwsomeFox/egmp-aa-ev-hmg-api.git   f12237caa205c8b13f86220169455388c30cf271
-fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          a9d472a22fe70fab1c3b5d33a505529847b9fd90
+fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          6ba86afcdbed3d418f8f0e573541c39ecdacb3bf
 fetch_upstream tinyalsa              https://github.com/tinyalsa/tinyalsa.git              a7cd26a17fe2add2ff38d2f281ed0b919187a068
 
 WORK_SRC="$SUITE_ROOT/out/work-src"
 rm -rf "$SUITE_ROOT/out" "$SUITE_ROOT/dist"
-mkdir -p "$WORK_SRC" "$SUITE_ROOT/dist/mods"
+mkdir -p "$WORK_SRC" "$SUITE_ROOT/dist/mods" "$SUITE_ROOT/dist/standalone"
 
 prepare_copy() {
     name=$1
@@ -103,11 +101,11 @@ prepare_copy() {
     git -C "$WORK_SRC/$name" clean -fdx >/dev/null
 }
 
-prepare_copy hmgapi-wireless-cp-aa 7fea56def357ec15f605bc6631554f11c3d578e4
+prepare_copy hmgapi-wireless-cp-aa 2af1849bee473d2ae8719b35acf06421e1c4a974
 prepare_copy hmgapi-adb            8d9dd39872e87702f32f8cbb90896c63ac77d6bc
 prepare_copy hmg-aa-dpi            4222625d25e2776f926cf372ff3220fc3ec6d20c
 prepare_copy egmp-aa-ev-hmg-api    f12237caa205c8b13f86220169455388c30cf271
-prepare_copy light-vibes           a9d472a22fe70fab1c3b5d33a505529847b9fd90
+prepare_copy light-vibes           6ba86afcdbed3d418f8f0e573541c39ecdacb3bf
 
 mkdir -p "$WORK_SRC/light-vibes/third_party"
 cp -a "$CACHE_DIR/tinyalsa" "$WORK_SRC/light-vibes/third_party/tinyalsa"
@@ -139,8 +137,10 @@ echo "=================================================================="
     sh "$HMGAPI_SDK/bin/mknemesismod.sh" "$z"
     cp "$z" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.1.hmgapi.zip"
     cp out/dist/wireless-carplay-aa-2.2.1-nemesis-package.zip "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.1-nemesis-package.zip"
+    mkdir -p out/staged/wireless-carplay-aa
+    unzip -q "$z" -d out/staged/wireless-carplay-aa
 )
-WIRELESS_BUILT="$WORK_SRC/hmgapi-wireless-cp-aa/out/build/wireless-carplay-aa"
+WIRELESS_BUILT="$WORK_SRC/hmgapi-wireless-cp-aa/out/staged/wireless-carplay-aa"
 
 echo ""
 echo "=================================================================="
@@ -195,10 +195,18 @@ echo "=================================================================="
 sh "$SUITE_ROOT/hmgapi-comfort/build.sh"
 cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.1.hmgapi.zip" "$SUITE_ROOT/dist/mods/"
 cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.1-nemesis-package.zip" "$SUITE_ROOT/dist/mods/"
+for f in \
+    hmgapi-comfort-v1.0.1.hmgapi.zip \
+    hmgapi-comfort-v1.0.1-hmgapi-usb.zip \
+    hmgapi-comfort-v1.0.1-nemesis-usb.zip \
+    hmgapi-comfort-v1.0.1-nemesis-package.zip
+do
+    cp "$SUITE_ROOT/hmgapi-comfort/dist/$f" "$SUITE_ROOT/dist/standalone/$f"
+done
 
 echo ""
 echo "=================================================================="
-echo " STEP 6b: Building, Testing & Signing light-vibes 0.6.8 (intense-effects)"
+echo " STEP 6b: Building, Testing & Signing light-vibes 0.6.9 (intense-effects)"
 echo "=================================================================="
 (
     cd "$WORK_SRC/light-vibes"
@@ -208,21 +216,16 @@ echo "=================================================================="
     LVVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' mod/mod.json)
     cp "dist/light-vibes-v${LVVER}.hmgapi.zip" "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}.hmgapi.zip"
     cp "dist/light-vibes-v${LVVER}-nemesis-package.zip" "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}-nemesis-package.zip"
+    for f in \
+        "light-vibes-v${LVVER}.hmgapi.zip" \
+        "light-vibes-v${LVVER}-hmgapi-usb.zip" \
+        "light-vibes-v${LVVER}-nemesis-usb.zip" \
+        "light-vibes-v${LVVER}-nemesis-package.zip"
+    do
+        cp "dist/$f" "$SUITE_ROOT/dist/standalone/$f"
+    done
 )
 LVVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$WORK_SRC/light-vibes/mod/mod.json")
-
-if [ "$WITH_EXTRAS" = 1 ]; then
-    echo ""
-    echo "=================================================================="
-    echo " STEP 6c: Building Optional Extra brake-indicator-gen5w"
-    echo "=================================================================="
-    BRAKE_REPO=${BRAKE_REPO:-$SUITE_ROOT/../brake-indicator-gen5w}
-    [ -x "$BRAKE_REPO/build.sh" ] || { echo "Missing $BRAKE_REPO/build.sh" >&2; exit 1; }
-    (cd "$BRAKE_REPO" && HMGAPI_SDK="$HMGAPI_SDK" HMGAPI_KEY="$HMGAPI_KEY" ./build.sh)
-    BVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$BRAKE_REPO/brake-indicator-gen5w/mod.json")
-    cp "$BRAKE_REPO/dist/brake-indicator-gen5w-v${BVER}.hmgapi.zip" "$SUITE_ROOT/dist/mods/"
-    cp "$BRAKE_REPO/dist/brake-indicator-gen5w-v${BVER}-nemesis-package.zip" "$SUITE_ROOT/dist/mods/"
-fi
 
 CORE_VER=$(cat "$HMGAPI_SDK/VERSION")
 CORE_NEM_PKG="$HMGAPI/out/dist/hmgapi-${CORE_VER}-nemesis-package.zip"
@@ -250,9 +253,6 @@ for d in "$STAGE_EXEC" "$STAGE_LIST" "$STAGE_UPD"; do
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0.hmgapi.zip"          "$d/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.1.hmgapi.zip"      "$d/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}.hmgapi.zip"      "$d/HMGAPI/updates/06-light-vibes.hmgapi.zip"
-    if [ "$WITH_EXTRAS" = 1 ]; then
-        cp "$SUITE_ROOT/dist/mods/brake-indicator-gen5w-v${BVER}.hmgapi.zip" "$d/HMGAPI/updates/07-brake-indicator-gen5w.hmgapi.zip"
-    fi
 done
 
 # Populate NEMESIS packages/ folder for both NEMESIS sticks
@@ -264,9 +264,6 @@ for d in "$STAGE_EXEC" "$STAGE_LIST"; do
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0-nemesis-package.zip"          "$d/packages/hmgapi.egmp-aa-ev.zip"
     cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.1-nemesis-package.zip"      "$d/packages/hmgapi.hmgapi-comfort.zip"
     cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}-nemesis-package.zip"      "$d/packages/hmgapi.light-vibes.zip"
-    if [ "$WITH_EXTRAS" = 1 ]; then
-        cp "$SUITE_ROOT/dist/mods/brake-indicator-gen5w-v${BVER}-nemesis-package.zip" "$d/packages/hmgapi.brake-indicator-gen5w.zip"
-    fi
 done
 
 # One-tap execute stick root files
@@ -290,7 +287,7 @@ published=${TODAY}
 [package.1]
 path=packages/hmgapi.wireless-carplay-aa.zip
 name=Wireless CarPlay + Android Auto (2.2.1)
-short-desc=Wireless CP/AA (rc.2), cluster/HUD TBT, BT focus guard, freeze & audio fixes
+short-desc=Wireless CP/AA (rc.4), cluster/HUD TBT, BT focus guard, freeze & audio fixes
 published=${TODAY}
 
 [package.2]
@@ -324,28 +321,18 @@ short-desc=Music & speed reactive ambient lighting for Gen5W
 published=${TODAY}
 EOF
 
-if [ "$WITH_EXTRAS" = 1 ]; then
-    cat >> "$STAGE_LIST/NEMESIS.data" <<EOF
-
-[package.7]
-path=packages/hmgapi.brake-indicator-gen5w.zip
-name=Brake Light Indicator (${BVER})
-short-desc=Status-bar brake lamp indicator with E-GMP regen + BLE OBD support
-published=${TODAY}
-EOF
-fi
-
 echo ""
 echo "=================================================================="
-echo " STEP 8: End-to-End Multi-Mod Integration Test (260507 & 260903)"
+echo " STEP 8: End-to-End Multi-Mod & Standalone Integration Tests"
 echo "=================================================================="
-sh "$SUITE_ROOT/tools/integration-test.sh" "$STAGE_EXEC/HMGAPI/updates"
+sh "$SUITE_ROOT/tools/integration-test.sh" "$STAGE_EXEC/HMGAPI/updates" "$SUITE_ROOT/dist/standalone"
 
 (cd "$STAGE_EXEC" && zip -qr "$SUITE_ROOT/dist/gen5w-suite-usb.zip" .)
 (cd "$STAGE_LIST" && zip -qr "$SUITE_ROOT/dist/gen5w-suite-nemesis-store-usb.zip" .)
 (cd "$STAGE_UPD"  && zip -qr "$SUITE_ROOT/dist/gen5w-suite-hmgapi-updates-usb.zip" .)
 
-(cd "$SUITE_ROOT/dist" && sha256sum *.zip mods/*.zip > SHA256SUMS)
+(cd "$SUITE_ROOT/dist/standalone" && sha256sum *.zip > SHA256SUMS)
+(cd "$SUITE_ROOT/dist" && sha256sum *.zip standalone/*.zip mods/*.zip > SHA256SUMS)
 echo ""
 echo "=================================================================="
 echo " Gen5W Suite Build & Verification SUCCEEDED!"

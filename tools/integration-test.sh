@@ -11,7 +11,8 @@ set -e
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 HMGAPI=${HMGAPI:?set HMGAPI to HMG-API checkout}
 HMGAPI_SDK=${HMGAPI_SDK:?set HMGAPI_SDK to unpacked HMG-API mod SDK}
-UPDATES_DIR=${1:?usage: integration-test.sh <updates-dir>}
+UPDATES_DIR=${1:?usage: integration-test.sh <updates-dir> [standalone-dir]}
+STANDALONE_DIR=${2:-$HERE/dist/standalone}
 
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
@@ -46,13 +47,9 @@ hasnt() {
     esac
 }
 
-for P in \
-    NEEV.USA.0000.V015.012.260507 \
-    NEEV23.USA.0000.V015.012.260903 \
-    NEEV23SE.USA.0000.V015.012.260903
-do
-    echo "== Multi-mod integration test on $P =="
-    R="$T/$P"
+setup_fixture() {
+    R=$1
+    P=$2
     mkdir -p "$R/system/app" "$R/system/lib" "$R/system/etc/permissions" \
              "$R/system/etc/wifi" "$R/system/onebin/USA" \
              "$R/sys/bus/sdio/devices/mmc1:0001:1" \
@@ -69,7 +66,7 @@ do
     printf 'p2p_no_go_freq=5000-5850\n' > "$R/system/etc/wifi/wpa_supplicant_overlay.conf"
     printf 'prop/persist.service.adb.tcp.enable=1\nprop/persist.sys.usb.config=adb\nprop/persist.adb.tcp.port=5555\n' > "$R/settings.txt"
 
-    cp -r "$HMGAPI/maps" "$R/data/hmgapi/maps"
+    python3 "$HMGAPI/tools/maplib.py" expand "$R/data/hmgapi/maps"
     cp "$HMGAPI_SDK/points.txt" "$R/data/hmgapi/maps/points.txt"
     touch "$R/data/hmgapi/settings/allow/testing_maps"
 
@@ -89,6 +86,16 @@ for cj in glob.glob(R + "/data/hmgapi/maps/*/*/*/*/car.json"):
             files[path] = hashlib.md5(open(f, "rb").read()).hexdigest()
     json.dump(car, open(cj, "w"), indent=2)
 PY
+}
+
+for P in \
+    NEEV.USA.0000.V015.012.260507 \
+    NEEV23.USA.0000.V015.012.260903 \
+    NEEV23SE.USA.0000.V015.012.260903
+do
+    echo "== Multi-mod integration test on $P =="
+    R="$T/$P"
+    setup_fixture "$R" "$P"
 
     BEFORE=$(cd "$R/system" && find . -type f | sort | xargs sha256sum)
     PROPS=$(cat "$R/props.env")
@@ -96,7 +103,7 @@ PY
     eng() {
         set +e
         out=$(HMGAPI_ROOT="$R" HMGAPI_HOST=1 HMGAPI_PRODUCT="$P" HMGAPI_ONEBIN=USA \
-              HMGAPI_PROPS="$PROPS" HMGAPI_LPATCH="$HMGAPI_SDK/bin/lpatch" \
+              HMGAPI_PROPS="$PROPS" HMGAPI_LPATCH="$HMGAPI_SDK/bin/lpatch-host" \
               java -cp "$HMGAPI_SDK/lib/hmgapi-engine.jar" hmgapi.engine.Engine "$@" 2>&1)
         rc=$?
         set -e
@@ -118,7 +125,7 @@ PY
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
     check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
-    check "$P: light-vibes version 0.6.8" "0.6.8" \
+    check "$P: light-vibes version 0.6.9" "0.6.9" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
 
     # Plan across ALL mods simultaneously
@@ -133,6 +140,8 @@ PY
     eng apply
     check "$P: single atomic apply succeeds" 0 "$rc"
     has "$P: audio converter added" "/system/lib/libleafiaaac.so" "$out"
+    has "$P: CarPlay identity serializer added" "/system/lib/libcarplayidentity.so" "$out"
+    has "$P: hotspot feature xml added" '<feature name="com.hkmc.software.wifihotspot" />' "$(cat "$R/system/etc/permissions/com.hkmc.software.wifihotspot.xml" 2>/dev/null)"
     check "$P: ADB defaults keep USB in host mode (host,adb)" "host,adb" \
         "$(grep '^prop/persist.sys.usb.config=' "$R/settings.txt" | cut -d= -f2-)"
     check "$P: Engineering Mode eth0 ADB switch turned off" "0" \
@@ -179,5 +188,59 @@ PY
     AFTER=$(cd "$R/system" && find . -type f | sort | xargs sha256sum)
     check "$P: /system byte-identical to stock after restore" "$BEFORE" "$AFTER"
 done
+
+if [ -d "$STANDALONE_DIR" ]; then
+    echo "== Standalone Comfort (1.0.1) & Light Vibes (0.6.9) package verification =="
+    for spec in \
+        "hmgapi-comfort:1.0.1" \
+        "light-vibes:0.6.9"
+    do
+        mid=${spec%:*}
+        mver=${spec#*:}
+        P="NEEV23.USA.0000.V015.012.260903"
+        R="$T/standalone-$mid"
+        setup_fixture "$R" "$P"
+        BEFORE=$(cd "$R/system" && find . -type f | sort | xargs sha256sum)
+        PROPS=$(cat "$R/props.env")
+
+        eng() {
+            set +e
+            out=$(HMGAPI_ROOT="$R" HMGAPI_HOST=1 HMGAPI_PRODUCT="$P" HMGAPI_ONEBIN=USA \
+                  HMGAPI_PROPS="$PROPS" HMGAPI_LPATCH="$HMGAPI_SDK/bin/lpatch-host" \
+                  java -cp "$HMGAPI_SDK/lib/hmgapi-engine.jar" hmgapi.engine.Engine "$@" 2>&1)
+            rc=$?
+            set -e
+        }
+
+        eng install "$STANDALONE_DIR/${mid}-v${mver}.hmgapi.zip" --from-nemesis
+        check "standalone $mid: install succeeds on clean unit" 0 "$rc"
+        eng plan
+        check "standalone $mid: plan succeeds alone" 0 "$rc"
+        eng apply
+        check "standalone $mid: apply succeeds alone" 0 "$rc"
+        eng restore
+        check "standalone $mid: restore succeeds alone" 0 "$rc"
+        AFTER=$(cd "$R/system" && find . -type f | sort | xargs sha256sum)
+        check "standalone $mid: /system untouched/restored cleanly" "$BEFORE" "$AFTER"
+
+        # Verify standalone -hmgapi-usb.zip and -nemesis-usb.zip archive structure & models="any"
+        USB_CHECK=$(python3 - "$STANDALONE_DIR" "$mid" "$mver" <<'PY'
+import io, sys, zipfile
+d, mid, ver = sys.argv[1:4]
+with zipfile.ZipFile(f"{d}/{mid}-v{ver}-hmgapi-usb.zip") as z:
+    assert f"HMGAPI/updates/{mid}-v{ver}.zip" in z.namelist(), z.namelist()
+with zipfile.ZipFile(f"{d}/{mid}-v{ver}-nemesis-usb.zip") as outer:
+    assert "NEMESIS.data" in outer.namelist(), outer.namelist()
+    inner_bytes = outer.read(f"packages/hmgapi.{mid}.zip")
+with zipfile.ZipFile(io.BytesIO(inner_bytes)) as inner:
+    ndata = inner.read("NEMESIS.data").decode("utf-8")
+    assert 'models="any"' in ndata, ndata
+    assert 'depends="hmgapi@>=1.0' in ndata, ndata
+print("ok")
+PY
+)
+        check "standalone $mid: USB archives & NEMESIS models=\"any\" valid" "ok" "$USB_CHECK"
+    done
+fi
 
 exit "$fail"

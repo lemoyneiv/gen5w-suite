@@ -72,6 +72,7 @@ sh "$HMGAPI_SDK/bin/mknemesismod.sh" "$SIGNED_ZIP"
 
 mkdir -p dist
 HMGAPI_ZIP="dist/${MOD}-v${VER}.hmgapi.zip"
+HMGAPI_USB="dist/${MOD}-v${VER}-hmgapi-usb.zip"
 NEM_PKG="dist/${MOD}-v${VER}-nemesis-package.zip"
 NEM_USB="dist/${MOD}-v${VER}-nemesis-usb.zip"
 
@@ -79,9 +80,9 @@ cp "$SIGNED_ZIP" "$HMGAPI_ZIP"
 cp "out/dist/${MOD}-${VER}-nemesis-package.zip" "$NEM_PKG"
 cp "out/dist/${MOD}-${VER}-nemesis.zip" "$NEM_USB"
 
-python3 - "$MOD" "$NEM_PKG" "$NEM_USB" <<'PY'
+python3 - "$MOD" "$VER" "$HMGAPI_ZIP" "$HMGAPI_USB" "$NEM_PKG" "$NEM_USB" <<'PY'
 import os, sys, zipfile
-mod, nem_pkg, nem_usb = sys.argv[1:4]
+mod, ver, hmg_zip, hmg_usb, nem_pkg, nem_usb = sys.argv[1:7]
 def swap_in_zip(path, member, new_bytes):
     with zipfile.ZipFile(path, "r") as z:
         items = [(i, z.read(i)) for i in z.infolist()]
@@ -92,6 +93,8 @@ open_sh = os.path.join(mod, "open.sh")
 if os.path.isfile(open_sh):
     swap_in_zip(nem_pkg, "bin/open.sh", open(open_sh, "rb").read())
     swap_in_zip(nem_usb, f"packages/hmgapi.{mod}.zip", open(nem_pkg, "rb").read())
+with zipfile.ZipFile(hmg_usb, "w", zipfile.ZIP_STORED) as z:
+    z.write(hmg_zip, f"HMGAPI/updates/{mod}-v{ver}.zip")
 PY
 
 (cd dist && sha256sum *.zip > SHA256SUMS)

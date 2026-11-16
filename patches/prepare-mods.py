@@ -67,37 +67,26 @@ def patch_wireless(repo: Path) -> None:
     assert "dipo.carplay.disable_bluetooth" in src, "Expected upstream PR #2 hook in Dipo.java"
     assert "watchdog" not in src.lower()
 
-    # Update mod.json
+    # Update mod.json (preserve upstream v2.2.0-rc.4 wifi hotspot, CarPlay identity, and CEEV CAN 260206)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
     mod["version"] = "2.2.1"
     mod["hmgapi"] = ">=1.1.0"
+    assert mod.get("wifi") == {"hotspot": True}, f"Expected wifi.hotspot in rc.4 mod.json, got {mod.get('wifi')}"
+    assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in rc.4 mod.json"
     add_coauthor(mod)
     mod["nemesis_conflicts"] = [
         "wireless.projection",
         "projection.tbt",
         "enhanced.projection",
     ]
-    mod["system"] = [
-        {
-            "model": ["CVEV", "NEEV", "NEEV23", "NEEV23SE"],
-            "region": "USA",
-            "firmware": "260507",
-            "features": ["hmgapi.wifi"],
-        },
-        {
-            "model": ["NEEV", "NEEV23", "NEEV23SE"],
-            "region": "USA",
-            "firmware": "260903",
-            "features": ["hmgapi.wifi"],
-        },
-        {
-            "model": ["CVEV", "NEEV"],
-            "region": "CAN",
-            "firmware": "260206",
-            "features": ["hmgapi.wifi"],
-        },
-    ]
+    for entry in mod.get("system", []):
+        if entry.get("region") == "USA" and entry.get("firmware") in ("260507", "260903"):
+            models = list(entry["model"]) if isinstance(entry["model"], list) else [entry["model"]]
+            for m in ("NEEV", "NEEV23", "NEEV23SE"):
+                if m not in models:
+                    models.append(m)
+            entry["model"] = models
     if not any(p.get("id") == "wifi_direct" for p in mod["parts"]):
         mod["parts"].append({"id": "wifi_direct", "when": "settings.wifi_direct"})
 
@@ -904,6 +893,53 @@ java -cp "$CP" hmgapi.mods.wireless.FocusPolicyTest
     )
     focus_test_sh.chmod(focus_test_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
+    # Install FocusGuard + PR #16 Compass replay stub methods in tools/aa-support/stubs so AaSupportTest passes cleanly
+    aa_support_root = repo / "wireless-carplay-aa/tools/aa-support/stubs"
+    if aa_support_root.is_dir():
+        (aa_support_root / "hmgapi/mods/wireless/FocusGuard.java").write_text(
+            """package hmgapi.mods.wireless;
+
+import android.content.Context;
+import hmgapi.hook.LoadedApp;
+import hmgapi.hook.ModContext;
+
+final class FocusGuard {
+    static void btAudio(ModContext mod, LoadedApp app) {}
+    static void gpm(ModContext mod, LoadedApp app) {}
+    static void onAaConnecting(ModContext mod, Context c) {}
+}
+""",
+            encoding="utf-8",
+        )
+        mh_stub = aa_support_root / "hmgapi/hook/MethodHook.java"
+        mh_text = mh_stub.read_text(encoding="utf-8")
+        mh_stub.write_text(
+            mh_text.replace(
+                "public Object thisObject;",
+                "public java.lang.reflect.Member method;\n        public Object thisObject;",
+            ),
+            encoding="utf-8",
+        )
+        (aa_support_root / "android/os/Looper.java").write_text(
+            """package android.os;
+
+public final class Looper {
+    public static Looper getMainLooper() { return new Looper(); }
+}
+""",
+            encoding="utf-8",
+        )
+        h_stub = aa_support_root / "android/os/Handler.java"
+        h_text = h_stub.read_text(encoding="utf-8")
+        h_stub.write_text(
+            h_text.replace(
+                "public boolean post(Runnable runnable) { pending.add(runnable); return true; }",
+                "public boolean post(Runnable runnable) { pending.add(runnable); return true; }\n"
+                "    public boolean postDelayed(Runnable runnable, long delayMillis) { return post(runnable); }",
+            ),
+            encoding="utf-8",
+        )
+
     # Update wireless-carplay-aa/test.sh expected NEMESIS depends string
     test_sh = repo / "wireless-carplay-aa/test.sh"
     ttext = test_sh.read_text(encoding="utf-8")
@@ -989,11 +1025,32 @@ exit $fail
 def _adapt_engine_test_for_standalone_wireless(test_path: Path) -> None:
     s = test_path.read_text(encoding="utf-8")
     s = s.replace(
+        'trap \'rm -rf "$CP" "$T"\' EXIT',
+        'trap \'rm -rf "$CP" "$T"\' EXIT\n'
+        'python3 "$HMGAPI/tools/maplib.py" expand "$T/expanded-maps"',
+    )
+    s = s.replace(
+        'cp -r "$HMGAPI/maps" "$R/data/hmgapi/maps"',
+        'cp -r "$T/expanded-maps" "$R/data/hmgapi/maps"',
+    )
+    s = s.replace(
         'cp -r "$HMGAPI/mods/wireless-carplay-aa" "$R/data/hmgapi/mods/wireless-carplay-aa"',
         'cp -r "${WIRELESS_MOD:-$HMGAPI/mods/wireless-carplay-aa}" "$R/data/hmgapi/mods/wireless-carplay-aa"\n'
-        '    mkdir -p "$R/system/onebin/USA"\n'
+        '    mkdir -p "$R/system/onebin/USA" "$R/system/etc/permissions" "$R/sys/bus/sdio/devices/mmc1:0001:1"\n'
+        '    printf \'ro.build.product=%s\\nro.board.platform=tcc803x\\nro.build.version.release=4.4.2\\nro.mobis.onebindir=USA\\n\' "$1" > "$R/props.txt"\n'
         '    echo "-/system/etc/permissions/com.hkmc.software.wifihotspot.xml" > "$R/system/onebin/USA/featurexml.cfg"',
     )
+    s = s.replace(
+        'for cj in "$HMGAPI"/maps/*/*/*/*/car.json; do',
+        'for cj in "$T/expanded-maps"/*/*/*/*/car.json; do\n    grep -q "no stock /system/app/HKMC_GPM.odex" "$cj" && continue',
+    )
+    s = s.replace(
+        'for m in "$HMGAPI"/maps/*/*/*/*; do',
+        'for c in "$T/expanded-maps"/*/*/*/*/car.json; do m=$(dirname "$c")',
+    )
+    s = s.replace('"$HMGAPI"/maps/*/*/*/*/car.json', '"$T/expanded-maps"/*/*/*/*/car.json')
+    s = s.replace('$HMGAPI/maps/$1/car.json', '$T/expanded-maps/$1/car.json')
+    s = s.replace('${m#$HMGAPI/maps/}', '${m#$T/expanded-maps/}')
     s = s.replace(
         'wireless="$HMGAPI/mods/wireless-carplay-aa/recipes/aa-tbt-$suffix.recipe"',
         'wireless="${WIRELESS_MOD:-$HMGAPI/mods/wireless-carplay-aa}/recipes/aa-tbt-$suffix.recipe"',
@@ -1001,6 +1058,14 @@ def _adapt_engine_test_for_standalone_wireless(test_path: Path) -> None:
     s = s.replace(
         'HMGAPI_ROOT=$R HMGAPI_HOST=1 HMGAPI_PRODUCT=$P',
         'HMGAPI_ROOT=$R HMGAPI_HOST=1 HMGAPI_PRODUCT=$P HMGAPI_ONEBIN=USA',
+    )
+    s = s.replace(
+        '"hyundai/ceev/usa/260903 CEEV.USA.0000.V016.010.260903"',
+        '"hyundai/ceev/can/260206 CEEV.CAN.0000.V015.011.260206"',
+    )
+    s = s.replace(
+        'gone = [p for p in want if p not in have or p in missing]',
+        'gone = [p for p in want if (p not in have or p in missing) and not missing.get(p, "").startswith("no stock ")]',
     )
     test_path.write_text(s, encoding="utf-8")
 
@@ -1053,10 +1118,10 @@ def patch_egmp_aa_ev(repo: Path) -> None:
 def patch_light_vibes(repo: Path) -> None:
     if not (repo / "build.sh").exists():
         return
-    print("== Preparing light-vibes 0.6.8")
+    print("== Preparing light-vibes 0.6.9")
     mod_path = repo / "mod/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    assert mod["version"] == "0.6.8", f"Expected light-vibes 0.6.8, got {mod.get('version')}"
+    assert mod["version"] == "0.6.9", f"Expected light-vibes 0.6.9, got {mod.get('version')}"
     add_coauthor(mod)
     mod["repo"] = "https://github.com/lemoyneiv/light-vibes"
     write_json(mod_path, mod)
@@ -1070,6 +1135,15 @@ def patch_light_vibes(repo: Path) -> None:
     )
     assert old_jar in bsrc, "Expected ANDROID_JAR line in light-vibes/build.sh"
     bpath.write_text(bsrc.replace(old_jar, new_jar, 1), encoding="utf-8")
+
+    # Keep models="any" in NEMESIS.data (matching HMG-API's mknemesismod.sh) so standalone
+    # NEMESIS USB install works on US Hyundai Ioniq 5 units where /system/onebin is "USA"
+    sign_py = repo / "tools/sign.py"
+    ssrc = sign_py.read_text(encoding="utf-8")
+    old_models = 'TESTED_MODELS = "cvev_us,neev_us,neev23_us,neev23se_us,ceev_us"'
+    new_models = 'TESTED_MODELS = "any"'
+    assert old_models in ssrc, "Expected TESTED_MODELS line in light-vibes/tools/sign.py"
+    sign_py.write_text(ssrc.replace(old_models, new_models, 1), encoding="utf-8")
 
 
 def main() -> int:
