@@ -88,7 +88,7 @@ fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless
 fetch_upstream hmgapi-adb            https://github.com/Open-HMG/hmgapi-adb.git            8d9dd39872e87702f32f8cbb90896c63ac77d6bc
 fetch_upstream hmg-aa-dpi            https://github.com/eliotwass/hmg-aa-dpi.git           4222625d25e2776f926cf372ff3220fc3ec6d20c
 fetch_upstream egmp-aa-ev-hmg-api    https://github.com/AwsomeFox/egmp-aa-ev-hmg-api.git   f12237caa205c8b13f86220169455388c30cf271
-fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          2bdd33a506f380d2bc0305284856d185416afeff
+fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          a9d472a22fe70fab1c3b5d33a505529847b9fd90
 fetch_upstream tinyalsa              https://github.com/tinyalsa/tinyalsa.git              a7cd26a17fe2add2ff38d2f281ed0b919187a068
 
 WORK_SRC="$SUITE_ROOT/out/work-src"
@@ -107,7 +107,7 @@ prepare_copy hmgapi-wireless-cp-aa 7fea56def357ec15f605bc6631554f11c3d578e4
 prepare_copy hmgapi-adb            8d9dd39872e87702f32f8cbb90896c63ac77d6bc
 prepare_copy hmg-aa-dpi            4222625d25e2776f926cf372ff3220fc3ec6d20c
 prepare_copy egmp-aa-ev-hmg-api    f12237caa205c8b13f86220169455388c30cf271
-prepare_copy light-vibes           2bdd33a506f380d2bc0305284856d185416afeff
+prepare_copy light-vibes           a9d472a22fe70fab1c3b5d33a505529847b9fd90
 
 mkdir -p "$WORK_SRC/light-vibes/third_party"
 cp -a "$CACHE_DIR/tinyalsa" "$WORK_SRC/light-vibes/third_party/tinyalsa"
@@ -198,7 +198,7 @@ cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.1-nemesis-package.zip" "
 
 echo ""
 echo "=================================================================="
-echo " STEP 6b: Building, Testing & Signing light-vibes 0.6.7 (intense-effects)"
+echo " STEP 6b: Building, Testing & Signing light-vibes 0.6.8 (intense-effects)"
 echo "=================================================================="
 (
     cd "$WORK_SRC/light-vibes"

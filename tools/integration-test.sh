@@ -117,7 +117,9 @@ PY
     check "$P: aa-dpi authors" "eliotwass, AwsomeFox, lemoyneiv" "$(mod_authors aa-dpi)"
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
-    check "$P: light-vibes authors" "Kyle, lemoyneiv" "$(mod_authors light-vibes)"
+    check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
+    check "$P: light-vibes version 0.6.8" "0.6.8" \
+        "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
 
     # Plan across ALL mods simultaneously
     eng plan

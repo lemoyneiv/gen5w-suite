@@ -1053,9 +1053,10 @@ def patch_egmp_aa_ev(repo: Path) -> None:
 def patch_light_vibes(repo: Path) -> None:
     if not (repo / "build.sh").exists():
         return
-    print("== Preparing light-vibes 0.6.7")
+    print("== Preparing light-vibes 0.6.8")
     mod_path = repo / "mod/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
+    assert mod["version"] == "0.6.8", f"Expected light-vibes 0.6.8, got {mod.get('version')}"
     add_coauthor(mod)
     mod["repo"] = "https://github.com/lemoyneiv/light-vibes"
     write_json(mod_path, mod)

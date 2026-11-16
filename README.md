@@ -16,7 +16,7 @@ Every mod in this suite is signed with a single trusted author key (`28ad71e0-07
 | `03` | **`aa-dpi`** | `0.3.0` | `eliotwass`, `AwsomeFox`, `lemoyneiv` | Upgraded to `eliotwass/hmg-aa-dpi` `0.3.0`: target **200 DPI**, **tap/scroll limit off** (`tap_limit: false`), **60 fps** video window (`video_window: 6`), `nemesis_conflicts: ["aa.dpi"]` |
 | `04` | **`egmp-aa-ev`** | `0.7.0` | `willemcvu`, `AwsomeFox` *(stock)* | Google Maps EV routing over Android Auto (live SoC, range, charge curves, automatic DC fast-charger battery preconditioning), `nemesis_conflicts: ["aa.ev.model"]` |
 | `05` | **`hmgapi-comfort`** | `1.0.1` | `lemoyneiv` *(original)* | **Native HMG-API mod** replacing both `hkmc-coldstart-heat` and `hkmc-factory82`: dedicated `WelcomeDaemon` (`user=system, start=boot`) for sub-second cold-boot & QuickBoot STR welcome screen dismissal + 3-tier cold heating + 3-tier warm seat ventilation + independent wheel threshold + passenger policy + 60 s post-wake fresh ambient temperature wait + widescreen Gen5W dashboard app with **Home Screen Tiles…** shortcut |
-| `06` | **[`light-vibes`](https://github.com/lemoyneiv/light-vibes/tree/intense-effects)** | `0.6.7` | `Kyle`, `lemoyneiv` | **Intense Effects** branch: music- & speed-reactive Gen5W ambient lighting (`lightvibesd` static ARMv7 + `LightVibes.apk` Material 3 preset studio, zero `/system` edits) |
+| `06` | **[`light-vibes`](https://github.com/lemoyneiv/light-vibes/tree/intense-effects)** | `0.6.8` | `Kyle (dibble9012)`, `lemoyneiv` | **Intense Effects** branch: music- & speed-reactive Gen5W ambient lighting (`lightvibesd` static ARMv7 + `LightVibes.apk` Material 3 preset studio, USB-only LED testing & stock color capture, zero `/system` edits) |
 | `07` *(opt)* | **[`brake-indicator-gen5w`](https://github.com/lemoyneiv/brake-indicator-gen5w)** | `0.7.6` | `lemoyneiv` *(original)* | Optional (`./build-suite.sh --with-extras`): status-bar brake lamp indicator using E-GMP regen thresholds + BLE OBD-II ground-truth telemetry |
 
 ---
@@ -85,7 +85,7 @@ Assumes **NEMESIS (`>= 1.16`)** is already installed on the head unit:
 ```
 
 `build-suite.sh` runs:
-1. `patches/prepare-mods.py` on clean pinned checkouts of the upstream mods (`v2.2.0-rc.2` `7fea56d`, `8d9dd39`, `4222625`, `f12237c`, `2bdd33a`).
+1. `patches/prepare-mods.py` on clean pinned checkouts of the upstream mods (`v2.2.0-rc.2` `7fea56d`, `8d9dd39`, `4222625`, `f12237c`, `a9d472a`).
 2. Offline hook-point & floor checks (`check-points.py`) against the `1.1.1-rc.2` SDK catalogue.
 3. Unit & engine tests for every mod (`CpTurnsTest`, `AaTurnsTest`, `KeyframesTest`, `FocusPolicyTest`, `leafiaaac_test`, `adb/test.sh`, `DpiTest`, `PrecondTest`/`RelayTest`/`SocCurveTest`, `ComfortPolicyTest` + `hmgapi-comfort/test.sh`, `light-vibes` `test_lamp` + `ReportTest` + beat/preset DSP analysis).
 4. Gen5W KitKat toolbox shell verification (`check-scripts.sh`) on every head-unit script (`usb/NEMESIS.sh`, `open.sh`, `svc/start.sh`, `lights.sh`, `offload.sh`).
