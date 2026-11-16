@@ -171,13 +171,22 @@ public final class ComfortPolicy {
         private boolean appliedThisDrive;
         private int offTicks;
         private long lastSleepGap = Long.MIN_VALUE;
+        private long lastWakeSeq = Long.MIN_VALUE;
 
         public synchronized void onSuspendCheck(long sleepGapMs) {
-            if (lastSleepGap != Long.MIN_VALUE && sleepGapMs - lastSleepGap >= 5000L) {
+            if (lastSleepGap != Long.MIN_VALUE && sleepGapMs - lastSleepGap >= 3000L) {
                 appliedThisDrive = false;
                 offTicks = 0;
             }
             lastSleepGap = sleepGapMs;
+        }
+
+        public synchronized void onWakeSeqCheck(long wakeSeq) {
+            if (lastWakeSeq != Long.MIN_VALUE && wakeSeq > lastWakeSeq) {
+                appliedThisDrive = false;
+                offTicks = 0;
+            }
+            lastWakeSeq = wakeSeq;
         }
 
         /** Returns true when a new EV_RDY drive needs auto-climate evaluation. */
@@ -213,6 +222,7 @@ public final class ComfortPolicy {
         private boolean screenOn = true;
         private long wakeAtMs;
         private long lastSleepGap = Long.MIN_VALUE;
+        private long lastWakeSeq = Long.MIN_VALUE;
 
         public WelcomeTracker(long nowMs) {
             this.wakeAtMs = nowMs;
@@ -232,12 +242,25 @@ public final class ComfortPolicy {
         }
 
         public synchronized void onSuspendCheck(long sleepGapMs, long nowMs) {
-            if (lastSleepGap != Long.MIN_VALUE && sleepGapMs - lastSleepGap >= 5000L) {
+            if (lastSleepGap != Long.MIN_VALUE && sleepGapMs - lastSleepGap >= 3000L) {
                 pending = true;
                 screenOn = true;
                 wakeAtMs = nowMs;
             }
             lastSleepGap = sleepGapMs;
+        }
+
+        public synchronized void onWakeSeqCheck(long wakeSeq, long nowMs) {
+            if (lastWakeSeq != Long.MIN_VALUE && wakeSeq > lastWakeSeq) {
+                pending = true;
+                screenOn = true;
+                wakeAtMs = nowMs;
+            }
+            lastWakeSeq = wakeSeq;
+        }
+
+        public synchronized boolean isPending() {
+            return pending && screenOn;
         }
 
         public synchronized boolean readyToDismiss(long nowMs, int delayMs) {

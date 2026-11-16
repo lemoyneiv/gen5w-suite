@@ -36,14 +36,6 @@ HMGAPI=${HMGAPI:-$SUITE_ROOT/../HMG-API}
 HMGAPI=$(cd "$HMGAPI" && pwd)
 export HMGAPI
 
-if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.1-nemesis-package.zip" ]; then
-    echo "== Building HMG-API Core & Mod SDK =="
-    (cd "$HMGAPI" && ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
-fi
-HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
-export HMGAPI_SDK
-export HMGAPI_FLOOR_POINTS="$HMGAPI_SDK/points.txt"
-
 if [ -n "${HMGAPI_KEY:-}" ]; then
     KEY_DIR=$(dirname "$HMGAPI_KEY")
 elif [ -f "$HOME/.hmgapi/author.key" ]; then
@@ -64,6 +56,15 @@ if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
     ln -s "$KEY_DIR" "$HOME/.hmgapi"
 fi
 
+CORE_APP_KEY="$KEY_DIR/hmgapi-core-app.p12"
+if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.2-nemesis-package.zip" ]; then
+    echo "== Building HMG-API Core 1.1.1-rc.2 & Mod SDK =="
+    (cd "$HMGAPI" && HMGAPI_KEY="$CORE_APP_KEY" ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
+fi
+HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
+export HMGAPI_SDK
+export HMGAPI_FLOOR_POINTS="$HMGAPI_SDK/points.txt"
+
 # 2. Fetch (or reuse cached) upstream mod repositories at pinned commits
 CACHE_DIR=${MOD_CACHE_DIR:-$SUITE_ROOT/.cache/upstream}
 mkdir -p "$CACHE_DIR"
@@ -83,8 +84,8 @@ fetch_upstream() {
     fi
 }
 
-fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless-cp-aa.git fa672126f1fa2c37f457534fa6a476ad3b8a24b5
-fetch_upstream hmgapi-adb            https://github.com/Open-HMG/hmgapi-adb.git            2d3eff8087ccefc9843aa4fd0a162e0806414aee
+fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless-cp-aa.git 7fea56def357ec15f605bc6631554f11c3d578e4
+fetch_upstream hmgapi-adb            https://github.com/Open-HMG/hmgapi-adb.git            8d9dd39872e87702f32f8cbb90896c63ac77d6bc
 fetch_upstream hmg-aa-dpi            https://github.com/eliotwass/hmg-aa-dpi.git           4222625d25e2776f926cf372ff3220fc3ec6d20c
 fetch_upstream egmp-aa-ev-hmg-api    https://github.com/AwsomeFox/egmp-aa-ev-hmg-api.git   f12237caa205c8b13f86220169455388c30cf271
 fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          2bdd33a506f380d2bc0305284856d185416afeff
@@ -102,8 +103,8 @@ prepare_copy() {
     git -C "$WORK_SRC/$name" clean -fdx >/dev/null
 }
 
-prepare_copy hmgapi-wireless-cp-aa fa672126f1fa2c37f457534fa6a476ad3b8a24b5
-prepare_copy hmgapi-adb            2d3eff8087ccefc9843aa4fd0a162e0806414aee
+prepare_copy hmgapi-wireless-cp-aa 7fea56def357ec15f605bc6631554f11c3d578e4
+prepare_copy hmgapi-adb            8d9dd39872e87702f32f8cbb90896c63ac77d6bc
 prepare_copy hmg-aa-dpi            4222625d25e2776f926cf372ff3220fc3ec6d20c
 prepare_copy egmp-aa-ev-hmg-api    f12237caa205c8b13f86220169455388c30cf271
 prepare_copy light-vibes           2bdd33a506f380d2bc0305284856d185416afeff
@@ -189,11 +190,11 @@ echo "=================================================================="
 
 echo ""
 echo "=================================================================="
-echo " STEP 6: Building, Testing & Signing hmgapi-comfort 1.0.0"
+echo " STEP 6: Building, Testing & Signing hmgapi-comfort 1.0.1"
 echo "=================================================================="
 sh "$SUITE_ROOT/hmgapi-comfort/build.sh"
-cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.0.hmgapi.zip" "$SUITE_ROOT/dist/mods/"
-cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.0-nemesis-package.zip" "$SUITE_ROOT/dist/mods/"
+cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.1.hmgapi.zip" "$SUITE_ROOT/dist/mods/"
+cp "$SUITE_ROOT/hmgapi-comfort/dist/hmgapi-comfort-v1.0.1-nemesis-package.zip" "$SUITE_ROOT/dist/mods/"
 
 echo ""
 echo "=================================================================="
@@ -247,7 +248,7 @@ for d in "$STAGE_EXEC" "$STAGE_LIST" "$STAGE_UPD"; do
     cp "$SUITE_ROOT/dist/mods/adb-v1.0.1.hmgapi.zip"                 "$d/HMGAPI/updates/02-adb.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0.hmgapi.zip"              "$d/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0.hmgapi.zip"          "$d/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
-    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.0.hmgapi.zip"      "$d/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
+    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.1.hmgapi.zip"      "$d/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}.hmgapi.zip"      "$d/HMGAPI/updates/06-light-vibes.hmgapi.zip"
     if [ "$WITH_EXTRAS" = 1 ]; then
         cp "$SUITE_ROOT/dist/mods/brake-indicator-gen5w-v${BVER}.hmgapi.zip" "$d/HMGAPI/updates/07-brake-indicator-gen5w.hmgapi.zip"
@@ -261,7 +262,7 @@ for d in "$STAGE_EXEC" "$STAGE_LIST"; do
     cp "$SUITE_ROOT/dist/mods/adb-v1.0.1-nemesis-package.zip"                 "$d/packages/hmgapi.adb.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0-nemesis-package.zip"              "$d/packages/hmgapi.aa-dpi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v0.7.0-nemesis-package.zip"          "$d/packages/hmgapi.egmp-aa-ev.zip"
-    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.0-nemesis-package.zip"      "$d/packages/hmgapi.hmgapi-comfort.zip"
+    cp "$SUITE_ROOT/dist/mods/hmgapi-comfort-v1.0.1-nemesis-package.zip"      "$d/packages/hmgapi.hmgapi-comfort.zip"
     cp "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}-nemesis-package.zip"      "$d/packages/hmgapi.light-vibes.zip"
     if [ "$WITH_EXTRAS" = 1 ]; then
         cp "$SUITE_ROOT/dist/mods/brake-indicator-gen5w-v${BVER}-nemesis-package.zip" "$d/packages/hmgapi.brake-indicator-gen5w.zip"
@@ -282,14 +283,14 @@ type=list
 
 [package.0]
 path=packages/hmgapi.zip
-name=HMG-API Core (${CORE_VER} BLE + VehicleHub)
-short-desc=Install first: HMG-API runtime, BLE central, and VehicleHub fixes
+name=HMG-API Core (${CORE_VER} BLE + VehicleHub + Home Tiles)
+short-desc=Install first: HMG-API runtime, BLE central, Home Screen Tiles, and VehicleHub
 published=${TODAY}
 
 [package.1]
 path=packages/hmgapi.wireless-carplay-aa.zip
 name=Wireless CarPlay + Android Auto (2.2.1)
-short-desc=Wireless CP/AA, cluster/HUD TBT, BT focus guard, freeze & audio fixes
+short-desc=Wireless CP/AA (rc.2), cluster/HUD TBT, BT focus guard, freeze & audio fixes
 published=${TODAY}
 
 [package.2]
@@ -312,8 +313,8 @@ published=${TODAY}
 
 [package.5]
 path=packages/hmgapi.hmgapi-comfort.zip
-name=Comfort & Startup (1.0.0)
-short-desc=Multi-tier auto seat/wheel heat + ventilation & welcome dismisser
+name=Comfort & Startup (1.0.1)
+short-desc=Multi-tier auto seat/wheel heat + ventilation & instant welcome dismisser
 published=${TODAY}
 
 [package.6]

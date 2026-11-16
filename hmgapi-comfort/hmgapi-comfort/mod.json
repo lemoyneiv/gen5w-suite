@@ -1,13 +1,13 @@
 {
   "id": "hmgapi-comfort",
   "name": "Comfort & Startup",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "hmgapi": ">=1.0.0",
   "authors": ["Kyle"],
   "license": "AGPL-3.0",
   "repo": "https://github.com/lemoyneiv/gen5w-suite",
   "nemesis_conflicts": ["coldstart.heat", "local.hkmc.factory82"],
-  "description": "Automatic multi-tier cold-start seat & steering wheel warming, summer seat ventilation, passenger/rear seat policies, and event-driven startup notice dismissal across cold boots and QuickBoot wakes.",
+  "description": "Automatic multi-tier cold-start seat & steering wheel warming, summer seat ventilation, passenger/rear seat policies, and instant startup notice dismissal across cold boots and QuickBoot wakes.",
   "live": true,
   "apps": [
     {
@@ -16,6 +16,14 @@
     }
   ],
   "services": [
+    {
+      "name": "welcome",
+      "jar": "app/Comfort.apk",
+      "class": "dev.lemoyne.comfort.WelcomeDaemon",
+      "user": "system",
+      "start": "boot",
+      "restart": true
+    },
     {
       "name": "starter",
       "script": "svc/start.sh",

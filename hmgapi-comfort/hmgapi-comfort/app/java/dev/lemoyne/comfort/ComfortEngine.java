@@ -160,14 +160,17 @@ public final class ComfortEngine {
             try {
                 long now = SystemClock.elapsedRealtime();
                 long sleepGap = now - SystemClock.uptimeMillis();
+                long wakeSeq = WelcomeDaemon.readWakeSeq();
                 driveTracker.onSuspendCheck(sleepGap);
+                driveTracker.onWakeSeqCheck(wakeSeq);
                 welcomeTracker.onSuspendCheck(sleepGap, now);
+                welcomeTracker.onWakeSeqCheck(wakeSeq, now);
 
                 HmgApi api = HmgApi.connect().timeout(3000);
                 if (!api.available()) {
                     connected = false;
                     notifyListeners();
-                    sleepQuietly(3000);
+                    sleepQuietly(1500);
                     continue;
                 }
                 String modId = api.mod();
@@ -184,16 +187,16 @@ public final class ComfortEngine {
                     config = parseConfig(api.settings());
                 }
 
-                Map<String, String> v = api.vehicle(READ_KEYS);
-                lastReadings = v;
-
-                // 1. Startup safety notice auto-dismiss
+                // 1. Startup safety notice auto-dismiss BEFORE 14-signal vehicle read so IPC latency never delays it
                 if (forceWelcomeRun || (config.welcomeDismiss
                         && welcomeTracker.readyToDismiss(SystemClock.elapsedRealtime(), config.welcomeDelayMs))) {
                     boolean manual = forceWelcomeRun;
                     forceWelcomeRun = false;
-                    handleWelcome(api, v, manual);
+                    handleWelcome(api, manual);
                 }
+
+                Map<String, String> v = api.vehicle(READ_KEYS);
+                lastReadings = v;
 
                 // 2. Cold/Warm auto-climate on EV Ready rising edge (or manual test button)
                 boolean manualClimate = forceClimateRun;
@@ -203,23 +206,16 @@ public final class ComfortEngine {
                 }
 
                 notifyListeners();
-                sleepQuietly(2500);
+                sleepQuietly(config.welcomeDismiss && welcomeTracker.isPending() ? 250 : 2500);
             } catch (Throwable t) {
                 Log.w(TAG, "[hmgapi-comfort] loop error: " + t);
-                sleepQuietly(3000);
+                sleepQuietly(1500);
             }
         }
         Log.i(TAG, "[hmgapi-comfort] background coordinator stopped");
     }
 
-    private void handleWelcome(HmgApi api, Map<String, String> v, boolean manual) {
-        String park = v.get("gear.park");
-        if ("0".equals(park) && !manual) {
-            welcomeTracker.markDone();
-            welcomeAttempts = 0;
-            lastWelcomeStatus = stamp("Skipped (shifted out of Park)");
-            return;
-        }
+    private void handleWelcome(HmgApi api, boolean manual) {
         try {
             String res = api.command("startup_notice", "dismiss");
             welcomeTracker.markDone();
@@ -228,14 +224,24 @@ public final class ComfortEngine {
             Log.i(TAG, "[hmgapi-comfort] startup_notice dismiss -> " + res);
         } catch (HmgApi.HmgApiException e) {
             String msg = e.getMessage() == null ? "" : e.getMessage();
-            if (msg.contains("once per start") || msg.contains("hasn't allowed") || msg.contains("didn't allow")) {
+            if (msg.contains("once per start")) {
+                welcomeTracker.markDone();
+                welcomeAttempts = 0;
+                lastWelcomeStatus = stamp("Dismissed on start (fast-path)");
+                Log.i(TAG, "[hmgapi-comfort] startup_notice -> already dismissed by WelcomeDaemon");
+            } else if (msg.contains("not in P") && !manual) {
+                welcomeTracker.markDone();
+                welcomeAttempts = 0;
+                lastWelcomeStatus = stamp("Skipped (shifted out of Park)");
+                Log.i(TAG, "[hmgapi-comfort] startup_notice -> " + msg);
+            } else if (msg.contains("hasn't allowed") || msg.contains("didn't allow")) {
                 welcomeTracker.markDone();
                 welcomeAttempts = 0;
                 lastWelcomeStatus = stamp(msg);
                 Log.i(TAG, "[hmgapi-comfort] startup_notice -> " + msg);
             } else {
                 welcomeAttempts++;
-                if (welcomeAttempts >= 8) {
+                if (welcomeAttempts >= 12) {
                     welcomeTracker.markDone();
                     welcomeAttempts = 0;
                     lastWelcomeStatus = stamp("Gave up: " + msg);

@@ -18,18 +18,38 @@ import hmgapi.client.HmgApi;
 public final class ComfortService extends Service {
     public static final String ACTION_MOBIS_SCREEN_ON = "com.mobis.intent.action.SCREEN_ON";
     public static final String ACTION_MOBIS_SCREEN_OFF = "com.mobis.intent.action.SCREEN_OFF";
+    public static final String ACTION_QB_WAKEUP = "com.daudio.app.qb.QB_WAKEUP";
+    public static final String ACTION_QB_POW_ON = "com.daudio.app.qb.QB_POW_ON";
+    public static final String ACTION_HKMC_QB_WAKEUP = "com.hkmc.intent.action.QB_WAKEUP";
+    public static final String ACTION_QB_SLEEP = "com.daudio.app.qb.QB_SLEEP";
+    public static final String ACTION_QB_POW_OFF = "com.daudio.app.qb.QB_POW_OFF";
 
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private ComfortEngine engine;
+
+    private static boolean isWakeAction(String act) {
+        return Intent.ACTION_SCREEN_ON.equals(act)
+                || ACTION_MOBIS_SCREEN_ON.equals(act)
+                || ACTION_QB_WAKEUP.equals(act)
+                || ACTION_QB_POW_ON.equals(act)
+                || ACTION_HKMC_QB_WAKEUP.equals(act);
+    }
+
+    private static boolean isSleepAction(String act) {
+        return Intent.ACTION_SCREEN_OFF.equals(act)
+                || ACTION_MOBIS_SCREEN_OFF.equals(act)
+                || ACTION_QB_SLEEP.equals(act)
+                || ACTION_QB_POW_OFF.equals(act);
+    }
 
     private final BroadcastReceiver eventReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             if (intent == null || engine == null) return;
             String act = intent.getAction();
-            if (Intent.ACTION_SCREEN_OFF.equals(act) || ACTION_MOBIS_SCREEN_OFF.equals(act)) {
+            if (isSleepAction(act)) {
                 engine.onScreenOff();
-            } else if (Intent.ACTION_SCREEN_ON.equals(act) || ACTION_MOBIS_SCREEN_ON.equals(act)) {
+            } else if (isWakeAction(act)) {
                 engine.onScreenOn();
             } else if (HmgApi.ACTION_STATE_CHANGED.equals(act)) {
                 checkEnabledAndReload();
@@ -48,6 +68,11 @@ public final class ComfortService extends Service {
         f.addAction(Intent.ACTION_SCREEN_OFF);
         f.addAction(ACTION_MOBIS_SCREEN_ON);
         f.addAction(ACTION_MOBIS_SCREEN_OFF);
+        f.addAction(ACTION_QB_WAKEUP);
+        f.addAction(ACTION_QB_POW_ON);
+        f.addAction(ACTION_HKMC_QB_WAKEUP);
+        f.addAction(ACTION_QB_SLEEP);
+        f.addAction(ACTION_QB_POW_OFF);
         f.addAction(HmgApi.ACTION_STATE_CHANGED);
         registerReceiver(eventReceiver, f);
     }
@@ -56,7 +81,7 @@ public final class ComfortService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (engine != null) {
             engine.ensureStarted();
-            if (intent != null && ACTION_MOBIS_SCREEN_ON.equals(intent.getAction())) {
+            if (intent != null && isWakeAction(intent.getAction())) {
                 engine.onScreenOn();
             }
             engine.requestSettingsReload();

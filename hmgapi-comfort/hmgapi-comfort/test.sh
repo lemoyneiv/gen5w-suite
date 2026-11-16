@@ -15,6 +15,7 @@ DEX_STRINGS=$(unzip -p "$B/app/Comfort.apk" classes.dex | strings)
 has "apk contains ComfortService" "Ldev/lemoyne/comfort/ComfortService;" "$DEX_STRINGS"
 has "apk contains ComfortEngine" "Ldev/lemoyne/comfort/ComfortEngine;" "$DEX_STRINGS"
 has "apk contains ComfortPolicy" "Ldev/lemoyne/comfort/ComfortPolicy;" "$DEX_STRINGS"
+has "apk contains WelcomeDaemon" "Ldev/lemoyne/comfort/WelcomeDaemon;" "$DEX_STRINGS"
 has "apk contains MainActivity" "Ldev/lemoyne/comfort/MainActivity;" "$DEX_STRINGS"
 has "apk contains BootReceiver" "Ldev/lemoyne/comfort/BootReceiver;" "$DEX_STRINGS"
 has "apk bundles HmgApi client" "Lhmgapi/client/HmgApi;" "$DEX_STRINGS"
@@ -32,6 +33,7 @@ cp -r "$M/icons" "$M/svc" "$R/data/hmgapi/mods/hmgapi-comfort/"
 eng plan
 check "engine plan succeeds" 0 "$rc"
 has "plan lists Comfort.apk" "dev.lemoyne.comfort (app/Comfort.apk)" "$out"
+has "plan lists fast-path welcome daemon as system at boot" "service  hmgapi-comfort/welcome as system, at boot, restarted if it stops" "$out"
 has "plan lists non-root starter service as system" "service  hmgapi-comfort/starter as system, at android" "$out"
 check "plan has zero problems" no "$(echo "$out" | grep -q '^problem ' && echo yes || echo no)"
 
@@ -39,6 +41,7 @@ eng apply
 check "engine apply succeeds" 0 "$rc"
 has "mod published as on" "1 of 1 mods on" "$out"
 has "mod in public state.json" '"hmgapi-comfort"' "$(cat "$R/data/hmgapi/public/state.json")"
+has "welcome daemon registered in services.txt at boot" "hmgapi-comfort welcome system boot yes jar app/Comfort.apk dev.lemoyne.comfort.WelcomeDaemon" "$(cat "$R/data/hmgapi/state/services.txt")"
 has "starter registered in services.txt as system" "hmgapi-comfort starter system android no script svc/start.sh -" "$(cat "$R/data/hmgapi/state/services.txt")"
 for cmd in startup_notice seat_heat seat_vent wheel_heat; do
     has "$cmd in commands.txt" "hmgapi-comfort $cmd" "$(cat "$R/data/hmgapi/state/commands.txt")"

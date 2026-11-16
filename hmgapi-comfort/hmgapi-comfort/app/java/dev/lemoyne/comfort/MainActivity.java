@@ -121,6 +121,25 @@ public final class MainActivity extends Activity implements ComfortEngine.Listen
         });
         header.addView(runNow, marginRight(dp(10)));
 
+        Button tilesBtn = pillButton("Home Screen Tiles…", MUTED_BTN);
+        tilesBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    Intent it = new Intent();
+                    it.setClassName("hmgapi.app", "hmgapi.app.MainActivity");
+                    it.putExtra("tab", 1);
+                    it.putExtra("settings_cat", "Home screen");
+                    it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    startActivity(it);
+                } catch (Throwable t) {
+                    android.widget.Toast.makeText(MainActivity.this,
+                            "Open HMG-API > Settings > Home screen", android.widget.Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        header.addView(tilesBtn, marginRight(dp(10)));
+
         Button dismissNow = pillButton("Dismiss Notice", MUTED_BTN);
         dismissNow.setOnClickListener(new View.OnClickListener() {
             @Override

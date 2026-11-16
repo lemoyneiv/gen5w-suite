@@ -127,6 +127,7 @@ PY
         "$(grep '^prop/persist.service.adb.tcp.enable=' "$R/settings.txt" | cut -d= -f2-)"
     has "$P: wireless CarPlay bridge prop set" "prop/persist.iap2.iden.wireless=t" "$(cat "$R/settings.txt")"
     has "$P: egmp-aa-ev relay service scheduled" "egmp-aa-ev relay" "$(cat "$R/data/hmgapi/state/services.txt")"
+    has "$P: hmgapi-comfort fast-path welcome boot service scheduled" "hmgapi-comfort welcome system boot yes jar app/Comfort.apk dev.lemoyne.comfort.WelcomeDaemon" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: hmgapi-comfort starter service scheduled" "hmgapi-comfort starter" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: light-vibes lights service scheduled" "light-vibes lights" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: Comfort.apk companion app scheduled" "dev.lemoyne.comfort hmgapi-comfort" "$(cat "$R/data/hmgapi/state/apps.txt")"
@@ -153,6 +154,12 @@ PY
 )
     check "$P: wireless-carplay-aa published default projection_focus=True" \
         "projection_focus=True" "$WL_FOCUS"
+
+    # Verify Home Screen Tile Manager CLI (launcher-tiles-set + launcher-tiles)
+    eng launcher-tiles-set '{"compact_gaps":true,"hidden":["com.hkmc.valet/.ValetActivity"]}'
+    check "$P: launcher-tiles-set succeeds" 0 "$rc"
+    has "$P: launcher-tiles-set saves 1 hidden tile" "saved: 1 hidden" "$out"
+    check "$P: public/launcher-tiles.json written" "yes" "$([ -f "$R/data/hmgapi/public/launcher-tiles.json" ] && echo yes || echo no)"
 
     # Restore everything back to stock and verify byte-identical /system
     eng restore

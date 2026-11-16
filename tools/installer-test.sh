@@ -121,6 +121,10 @@ cat > "$BIN/getprop" <<'EOF'
 #!/bin/sh
 [ "$1" = "sys.boot_completed" ] && echo 1
 EOF
+cat > "$BIN/setprop" <<EOF
+#!/bin/sh
+echo "setprop \$*" >> "$T/events.log"
+EOF
 cat > "$BIN/pm" <<EOF
 #!/bin/sh
 if [ "\$1" = "path" ]; then
@@ -129,13 +133,20 @@ if [ "\$1" = "path" ]; then
     esac
 elif [ "\$1" = "uninstall" ]; then
     echo "pm-uninstall \$2" >> "$T/events.log"
+elif [ "\$1" = "install" ]; then
+    echo "pm-install \$*" >> "$T/events.log"
+    echo "Success"
 fi
 EOF
 cat > "$BIN/am" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod 755 "$BIN/getprop" "$BIN/pm" "$BIN/am"
+chmod 755 "$BIN/getprop" "$BIN/setprop" "$BIN/pm" "$BIN/am"
+
+mkdir -p "$R/data/hmgapi/public"
+: > "$R/data/hmgapi/HmgApi.apk"
+: > "$R/data/hmgapi/public/HmgApi.apk"
 
 # Rewrite absolute /data and /system paths in a test copy of usb/NEMESIS.sh to point into $R
 sed -e "s|^export PATH=.*|export PATH=$BIN:/usr/bin:/bin|" \
@@ -163,6 +174,8 @@ has "ran /data/leafia/uninstall.sh" "leafia-uninstalled" "$EVENTS"
 has "ran /data/evergreen/uninstall.sh" "evergreen-uninstalled" "$EVENTS"
 has "uninstalled leafia.app APK" "pm-uninstall leafia.app" "$EVENTS"
 has "uninstalled evergreen.app APK" "pm-uninstall evergreen.app" "$EVENTS"
+has "fallback pm install -r used /data/hmgapi/HmgApi.apk" "pm-install install -r $R/data/hmgapi/HmgApi.apk" "$EVENTS"
+check "cleared pending public/HmgApi.apk on fallback success" "no" "$([ -f "$R/data/hmgapi/public/HmgApi.apk" ] && echo yes || echo no)"
 has "removed legacy leafia-helper mod from /data/hmgapi/mods" "hmgapid engine remove leafia-helper --from-nemesis" "$EVENTS"
 has "ensured block_ambient_light is off" "hmgapid allow block_ambient_light off" "$EVENTS"
 has "installed 06-light-vibes.hmgapi.zip" "06-light-vibes.hmgapi.zip" "$EVENTS"

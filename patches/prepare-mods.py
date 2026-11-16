@@ -54,35 +54,11 @@ def patch_wireless(repo: Path) -> None:
     assert not (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Watchdog.java").exists()
     assert not (repo / "wireless-carplay-aa/tools/watchdog").exists()
 
-    # Apply PR #2 hook (dipo.carplay.disable_bluetooth) in Dipo.java
+    # Verify upstream v2.2.0-rc.2 already includes PR #2 (dipo.carplay.disable_bluetooth) and no Watchdog
     dipo_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java"
     src = dipo_java.read_text(encoding="utf-8")
-    anchor = (
-        "        // DiPO's own wireless CarPlay (Hyundai's) stays off: "
-        "the feature file is there for the other apps\n"
-    )
-    pr2_hook = """        // the CarPlay library's disableBluetooth: DiPO disconnects the phone's whole Bluetooth link, as for
-        // wired CarPlay. On a wireless session some phones then end it after about a minute (#5), so the
-        // link stays up while wireless CarPlay runs (persist.ev6.cpwl.keepbt=0: DiPO's way). A car whose
-        // map has no such point yet (made from a Car Report older than HMG-API 1.1.0) goes without: the
-        // hooks after this one must still go in.
-        if (Points.has("dipo.carplay.disable_bluetooth")) {
-            mod.hook(cl, "dipo.carplay.disable_bluetooth", new MethodHook() {
-                @Override
-                protected void beforeHookedMethod(Param p) {
-                    if (!Bridge.sCpWireless || "0".equals(Bridge.prop("persist.ev6.cpwl.keepbt", "1"))) return;
-                    log("DiPO: Bluetooth kept up for wireless CarPlay (disableBluetooth skipped)");
-                    p.setResult(null);
-                }
-            });
-        } else {
-            log("DiPO: this car's map has no dipo.carplay.disable_bluetooth: Bluetooth isn't kept up for wireless CarPlay");
-        }
-"""
-    assert anchor in src, "Expected Dipo.java anchor not found"
-    assert "dipo.carplay.disable_bluetooth" not in src
+    assert "dipo.carplay.disable_bluetooth" in src, "Expected upstream PR #2 hook in Dipo.java"
     assert "watchdog" not in src.lower()
-    dipo_java.write_text(src.replace(anchor, pr2_hook + anchor, 1), encoding="utf-8")
 
     # Update mod.json
     mod_path = repo / "wireless-carplay-aa/mod.json"

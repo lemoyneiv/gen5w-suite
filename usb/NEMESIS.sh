@@ -141,7 +141,7 @@ if [ "$(getprop sys.boot_completed)" = 1 ]; then
 fi
 rm -rf /data/local/coldstart-heat /data/leafia /data/evergreen >/dev/null 2>&1
 
-# 2. Install or update HMG-API Core 1.1.1-rc.1 via NEMESIS
+# 2. Install or update HMG-API Core 1.1.1-rc.2 via NEMESIS
 if [ -f /data/nemesis/apps/hmgapi/NEMESIS.data ]; then
     msg "Updating HMG-API Core from packages/hmgapi.zip"
     out=$("$NEMESIS" install --update --force --accept-risk "$USB/packages/hmgapi.zip" 2>&1) || fail_install "HMG-API update failed: $out"
@@ -150,6 +150,23 @@ else
     out=$("$NEMESIS" install --accept-risk "$USB/packages/hmgapi.zip" 2>&1) || fail_install "HMG-API install failed: $out"
 fi
 msg "$out"
+
+# Verify HmgApi.apk installed cleanly from 0711 /data/hmgapi/HmgApi.apk when Android is up
+if [ "$(getprop sys.boot_completed)" = 1 ] && [ -f /data/hmgapi/HmgApi.apk ]; then
+    case "$(pm path hmgapi.app 2>/dev/null)" in
+        package:*) ;;
+        *)
+            msg "Ensuring HMG-API app is installed from /data/hmgapi/HmgApi.apk"
+            setprop sys.boot_completed 0
+            pm_out=$(pm install -r /data/hmgapi/HmgApi.apk 2>&1)
+            setprop sys.boot_completed 1
+            msg "$pm_out"
+            case "$pm_out" in
+                *Success*) rm -f /data/hmgapi/public/HmgApi.apk ;;
+            esac
+            ;;
+    esac
+fi
 
 HMGAPID=/system/bin/hmgapid
 [ -x "$HMGAPID" ] || fail_install "/system/bin/hmgapid missing after core install"
