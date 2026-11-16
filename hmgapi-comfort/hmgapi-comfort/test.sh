@@ -26,6 +26,8 @@ done
 
 d=$(HMGAPI_NEMESIS_CONFLICTS=/dev/null python3 "$HMGAPI_SDK/bin/nemesis-meta.py" depends hmgapi.hmgapi-comfort 'hmgapi@>=1.0' --mod "$M/mod.json")
 check "NEMESIS conflicts block coldstart.heat and local.hkmc.factory82" "hmgapi@>=1.0,!coldstart.heat,!local.hkmc.factory82" "$d"
+check "hmgapi-comfort attributed solely to lemoyneiv" "lemoyneiv" \
+    "$(python3 -c 'import json,sys; print(",".join(json.load(open(sys.argv[1]))["authors"]))' "$M/mod.json")"
 
 install_mod "$B"
 cp -r "$M/icons" "$M/svc" "$R/data/hmgapi/mods/hmgapi-comfort/"

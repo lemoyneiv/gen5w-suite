@@ -45,6 +45,13 @@ def run(cmd, cwd=None) -> None:
     subprocess.run(cmd, cwd=cwd, check=True)
 
 
+def add_coauthor(mod: dict, author: str = "lemoyneiv") -> None:
+    authors = list(mod.get("authors") or [])
+    if author not in authors:
+        authors.append(author)
+    mod["authors"] = authors
+
+
 def patch_wireless(repo: Path) -> None:
     print("== Preparing wireless-carplay-aa 2.2.1")
     patch_file = PATCH_DIR / "wireless-pr16-no-watchdog.patch"
@@ -65,6 +72,7 @@ def patch_wireless(repo: Path) -> None:
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
     mod["version"] = "2.2.1"
     mod["hmgapi"] = ">=1.1.0"
+    add_coauthor(mod)
     mod["nemesis_conflicts"] = [
         "wireless.projection",
         "projection.tbt",
@@ -910,6 +918,7 @@ def patch_adb(repo: Path) -> None:
     mod_path = repo / "adb/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
     mod["version"] = "1.0.1"
+    add_coauthor(mod)
     write_json(mod_path, mod)
 
     settings_path = repo / "adb/settings.json"
@@ -1001,6 +1010,7 @@ def patch_aa_dpi(repo: Path) -> None:
     mod_path = repo / "hmgapi-mod/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
     assert mod["version"] == "0.3.0"
+    add_coauthor(mod)
     mod["nemesis_conflicts"] = ["aa.dpi"]
     write_json(mod_path, mod)
 
@@ -1034,6 +1044,7 @@ def patch_egmp_aa_ev(repo: Path) -> None:
     mod_path = repo / "hmgapi-mod/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
     assert mod["version"] == "0.7.0"
+    assert mod.get("authors") == ["willemcvu", "AwsomeFox"], f"Unexpected egmp-aa-ev authors: {mod.get('authors')}"
     mod["nemesis_conflicts"] = ["aa.ev.model"]
     write_json(mod_path, mod)
     _adapt_engine_test_for_standalone_wireless(repo / "hmgapi-mod/test/engine-test.sh")
@@ -1043,6 +1054,12 @@ def patch_light_vibes(repo: Path) -> None:
     if not (repo / "build.sh").exists():
         return
     print("== Preparing light-vibes 0.6.7")
+    mod_path = repo / "mod/mod.json"
+    mod = json.loads(mod_path.read_text(encoding="utf-8"))
+    add_coauthor(mod)
+    mod["repo"] = "https://github.com/lemoyneiv/light-vibes"
+    write_json(mod_path, mod)
+
     bpath = repo / "build.sh"
     bsrc = bpath.read_text(encoding="utf-8")
     old_jar = "ANDROID_JAR=$SDK/platforms/android-19/android.jar"

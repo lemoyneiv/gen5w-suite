@@ -102,12 +102,22 @@ PY
         set -e
     }
 
-    # Install every signed mod zip in order, verifying trusted author list recognition
+    # Install every signed mod zip in order, verifying trusted author list recognition as lemoyneiv
     for z in "$UPDATES_DIR"/*.hmgapi.zip; do
         eng install "$z" --from-nemesis
         check "$P: install ${z##*/}" 0 "$rc"
-        has "$P: ${z##*/} recognized on trusted author list" "on HMG-API's trusted author list" "$out"
+        has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" "author   lemoyneiv (author key 28ad71e0-07c0-8e61-8bf3-380cc71f9280, on HMG-API's trusted author list)" "$out"
     done
+
+    mod_authors() {
+        python3 -c 'import json,sys; print(", ".join(json.load(open(sys.argv[1]))["authors"]))' "$R/data/hmgapi/mods/$1/mod.json"
+    }
+    check "$P: wireless-carplay-aa authors" "VysseCodes, lemoyneiv" "$(mod_authors wireless-carplay-aa)"
+    check "$P: adb authors" "VysseCodes, lemoyneiv" "$(mod_authors adb)"
+    check "$P: aa-dpi authors" "eliotwass, AwsomeFox, lemoyneiv" "$(mod_authors aa-dpi)"
+    check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
+    check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
+    check "$P: light-vibes authors" "Kyle, lemoyneiv" "$(mod_authors light-vibes)"
 
     # Plan across ALL mods simultaneously
     eng plan

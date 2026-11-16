@@ -3,7 +3,7 @@
   "name": "Comfort & Startup",
   "version": "1.0.1",
   "hmgapi": ">=1.0.0",
-  "authors": ["Kyle"],
+  "authors": ["lemoyneiv"],
   "license": "AGPL-3.0",
   "repo": "https://github.com/lemoyneiv/gen5w-suite",
   "nemesis_conflicts": ["coldstart.heat", "local.hkmc.factory82"],
