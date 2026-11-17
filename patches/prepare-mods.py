@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
 prepare-mods.py - Reproducibly applies Gen5W Suite customizations to clean
-working copies of the four upstream HMG-API mods:
+working copies of the three patched HMG-API mods (while `adb` and `egmp-aa-ev`
+consume unmodified official upstream-signed release archives and `hmgapi-comfort`
+builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
 
   1. wireless-carplay-aa (2.2.1):
      - PR #16 subset: Keyframes IDR screen-freeze recovery, CpTurns highway/
@@ -15,13 +17,10 @@ working copies of the four upstream HMG-API mods:
        bitsPerChannel==0 / bytesPerFrame==0 normalization + host unit tests.
      - US Ioniq 5 support across NEEV, NEEV23, NEEV23SE on 260507 and 260903,
        plus enhanced.projection in nemesis_conflicts.
-  2. adb (1.0.1):
-     - Safe default usb=false so USB drives and wired CarPlay/Android Auto keep
-       working immediately after install.
-  3. aa-dpi (0.3.0):
+  2. aa-dpi (0.3.0):
      - nemesis_conflicts: ["aa.dpi"], defaults (dpi=200, tap_limit=false, video_window=6).
-  4. egmp-aa-ev (0.7.0):
-     - nemesis_conflicts: ["aa.ev.model"].
+  3. light-vibes (0.6.9):
+     - models="any" in NEMESIS.data + Linux Android SDK fallback.
 """
 
 import argparse
@@ -949,79 +948,6 @@ public final class Looper {
     test_sh.write_text(ttext.replace(old_dep, new_dep, 1), encoding="utf-8")
 
 
-def patch_adb(repo: Path) -> None:
-    print("== Preparing adb 1.0.1 (usb default false)")
-    mod_path = repo / "adb/mod.json"
-    mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "1.0.1"
-    add_coauthor(mod)
-    write_json(mod_path, mod)
-
-    settings_path = repo / "adb/settings.json"
-    sdata = json.loads(settings_path.read_text(encoding="utf-8"))
-    found_usb = False
-    for item in sdata["settings"]:
-        if item["key"] == "usb":
-            item["default"] = False
-            found_usb = True
-    assert found_usb
-    write_json(settings_path, sdata)
-
-    # Update adb/test.sh to test safe defaults (usb=false, tcp=false -> host,adb)
-    test_sh = repo / "adb/test.sh"
-    test_sh.write_text(
-        """#!/bin/sh
-# Off-car test of the adb mod on the patch engine: safe defaults keep USB in host mode
-# (host,adb) and TCP off; each toggle sets its props, live mirror and adbd restart;
-# restore gives the stock values back.
-set -e
-M=$(cd "$(dirname "$0")" && pwd)
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
-R=$T/root
-. "${HMGAPI_SDK:?set HMGAPI_SDK to the unpacked mod SDK}/test/lib.sh"
-prop() { grep "^prop/$1=" $R/settings.txt | cut -d= -f2-; }
-check "NEMESIS package refuses adb.tcp (mod.json nemesis_conflicts)" "hmgapi@>=1.0,!adb.tcp" \\
-    "$(HMGAPI_NEMESIS_CONFLICTS=/dev/null $HMGAPI_SDK/bin/nemesis-meta.py depends hmgapi.adb 'hmgapi@>=1.0' --mod $M/mod.json)"
-mkdir -p $R/data/hmgapi/mods $R/data/hmgapi/settings
-printf 'ro.board.platform=tcc803x\\n' > $R/props.txt
-printf 'prop/persist.service.adb.tcp.enable=1\\nprop/persist.sys.usb.config=adb\\nprop/persist.adb.tcp.port=5555\\n' > $R/settings.txt
-install_mod "$M"
-
-eng apply; check "defaults apply" 0 $rc
-check "Engineering Mode switch off (no eth0 address)" 0 "$(prop persist.service.adb.tcp.enable)"
-check "USB port kept in host mode by default (flash drives + wired CP/AA work)" "host,adb" "$(prop persist.sys.usb.config)"
-check "adb over Wi-Fi off by default: port unset" "" "$(prop persist.adb.tcp.port)"
-has "switched live to host,adb" "live/sys.usb.config=host,adb" "$(cat $R/actions.log 2>/dev/null)"
-has "adbd restarted" "restart adbd" "$(cat $R/actions.log 2>/dev/null)"
-
-printf '{"usb": true}\\n' > $R/data/hmgapi/settings/adb.json
-: > $R/actions.log
-eng apply; check "USB on applies" 0 $rc
-check "USB adb on" "adb" "$(prop persist.sys.usb.config)"
-has "switched live to adb" "live/sys.usb.config=adb" "$(cat $R/actions.log)"
-
-printf '{"usb": false, "tcp": true}\\n' > $R/data/hmgapi/settings/adb.json
-: > $R/actions.log
-eng apply; check "TCP on: port 5555 (eth0 left alone)" 5555 "$(prop persist.adb.tcp.port)"
-check "port back to host mode (stock)" "host,adb" "$(prop persist.sys.usb.config)"
-has "adbd restarted" "restart adbd" "$(cat $R/actions.log)"
-check "... the car's switch stays off" 0 "$(prop persist.service.adb.tcp.enable)"
-
-printf '{"usb": true, "tcp": true}\\n' > $R/data/hmgapi/settings/adb.json
-: > $R/actions.log
-eng apply; check "both on again" "adb 5555" "$(prop persist.sys.usb.config) $(prop persist.adb.tcp.port)"
-check "USB on again: live switch only (TCP was already on)" "live/sys.usb.config=adb|" "$(grep -v STATE_CHANGED $R/actions.log | tr '\\n' '|')"
-
-: > $R/actions.log
-eng restore; check "restore" 0 $rc
-check "stock values back" "1 adb 5555" "$(prop persist.service.adb.tcp.enable) $(prop persist.sys.usb.config) $(prop persist.adb.tcp.port)"
-exit $fail
-""",
-        encoding="utf-8",
-    )
-    test_sh.chmod(test_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-
-
 def _adapt_engine_test_for_standalone_wireless(test_path: Path) -> None:
     s = test_path.read_text(encoding="utf-8")
     s = s.replace(
@@ -1104,17 +1030,6 @@ def patch_aa_dpi(repo: Path) -> None:
     _adapt_engine_test_for_standalone_wireless(repo / "hmgapi-mod/test/engine-test.sh")
 
 
-def patch_egmp_aa_ev(repo: Path) -> None:
-    print("== Preparing egmp-aa-ev 0.7.0")
-    mod_path = repo / "hmgapi-mod/mod.json"
-    mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    assert mod["version"] == "0.7.0"
-    assert mod.get("authors") == ["willemcvu", "AwsomeFox"], f"Unexpected egmp-aa-ev authors: {mod.get('authors')}"
-    mod["nemesis_conflicts"] = ["aa.ev.model"]
-    write_json(mod_path, mod)
-    _adapt_engine_test_for_standalone_wireless(repo / "hmgapi-mod/test/engine-test.sh")
-
-
 def patch_light_vibes(repo: Path) -> None:
     if not (repo / "build.sh").exists():
         return
@@ -1153,11 +1068,9 @@ def main() -> int:
     w = Path(args.work_dir).resolve()
 
     patch_wireless(w / "hmgapi-wireless-cp-aa")
-    patch_adb(w / "hmgapi-adb")
     patch_aa_dpi(w / "hmg-aa-dpi")
-    patch_egmp_aa_ev(w / "egmp-aa-ev-hmg-api")
     patch_light_vibes(w / "light-vibes")
-    print("All upstream mods prepared cleanly.")
+    print("All patched mods prepared cleanly.")
     return 0
 
 

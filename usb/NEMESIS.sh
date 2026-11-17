@@ -215,6 +215,7 @@ do
 done
 
 # If upgrading from AwsomeFox aa-dpi 0.2.x or an earlier build with tap_limit=true default (or RESET_SETTINGS), apply DPI 200 + tap_limit=false + 60fps
+mkdir -p /data/hmgapi/settings
 if [ -f "$USB/HMGAPI/RESET_SETTINGS" ]; then
     msg "HMGAPI/RESET_SETTINGS found on USB: resetting mod settings to suite defaults"
     rm -f /data/hmgapi/settings/wireless-carplay-aa.json \
@@ -235,14 +236,24 @@ elif [ -f /data/hmgapi/mods/aa-dpi/settings.json ] && [ -f /data/hmgapi/settings
     chmod 600 /data/hmgapi/settings/aa-dpi.json
 fi
 
-# 4. Install all signed suite mods in dependency order
+# Seed safe USB host-mode setting for official Open-HMG adb package when no user adb.json exists yet
+if [ ! -f /data/hmgapi/settings/adb.json ]; then
+    msg "Seeding /data/hmgapi/settings/adb.json (usb=false) so USB drives and wired CP/AA stay active"
+    echo '{"usb": false}' > /data/hmgapi/settings/adb.json
+    chmod 600 /data/hmgapi/settings/adb.json
+fi
+
+# 4. Install all signed suite mods in dependency order (preserving settings across author-key transitions)
+VYSSE_UUID="7251ce71-a146-8a1e-958b-dbffc6af7359"
+EGMP_UUID="839375d3-8aea-884a-a9e9-c79964fe5d88"
+
 install_suite_mod() {
-    local id=$1 zip=$2 was_off=0 out
+    local id=$1 zip=$2 expected_uuid=$3 was_off=0 out
     [ -f "$zip" ] || fail_install "Missing mod package $zip"
     if [ -d "/data/hmgapi/mods/$id" ]; then
         [ -f "/data/hmgapi/mods/$id/.disabled" ] && was_off=1
-        if ! grep -q "$SUITE_UUID" "/data/hmgapi/mods/$id/META-HMGAPI/manifest.json" 2>/dev/null; then
-            msg "Migrating $id to unified suite author key (preserving settings)"
+        if ! grep -q "$expected_uuid" "/data/hmgapi/mods/$id/META-HMGAPI/manifest.json" 2>/dev/null; then
+            msg "Migrating $id to author key $expected_uuid (preserving settings)"
             "$HMGAPID" engine remove "$id" --from-nemesis >> "$LOG" 2>&1
         fi
     fi
@@ -256,12 +267,12 @@ install_suite_mod() {
     fi
 }
 
-install_suite_mod wireless-carplay-aa "$USB/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip"
-install_suite_mod adb                 "$USB/HMGAPI/updates/02-adb.hmgapi.zip"
-install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
-install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
-install_suite_mod hmgapi-comfort      "$USB/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"
-install_suite_mod light-vibes         "$USB/HMGAPI/updates/06-light-vibes.hmgapi.zip"
+install_suite_mod wireless-carplay-aa "$USB/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip" "$SUITE_UUID"
+install_suite_mod adb                 "$USB/HMGAPI/updates/02-adb.hmgapi.zip"                 "$VYSSE_UUID"
+install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"              "$SUITE_UUID"
+install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"          "$EGMP_UUID"
+install_suite_mod hmgapi-comfort      "$USB/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"      "$SUITE_UUID"
+install_suite_mod light-vibes         "$USB/HMGAPI/updates/06-light-vibes.hmgapi.zip"         "$SUITE_UUID"
 
 # 5. Single atomic engine apply + mod APKs + NEMESIS package listing sync
 msg "Applying all enabled mods in a single transaction"

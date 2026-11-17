@@ -89,7 +89,13 @@ EOF
 printf '{"id": "aa-dpi", "version": "0.2.1"}\n' > "$R/data/hmgapi/mods/aa-dpi/mod.json"
 printf '{"dpi": 240, "tap_limit": true}\n' > "$R/data/hmgapi/settings/aa-dpi.json"
 
-# Stub USB files andhead-unit binaries (nemesis, hmgapid, getprop, pm, am, reboot, sync)
+# Existing adb signed by old suite key (should be removed/migrated to VysseCodes UUID) +
+# existing egmp-aa-ev already signed by AwsomeFox UUID (should NOT be removed)
+mkdir -p "$R/data/hmgapi/mods/adb/META-HMGAPI" "$R/data/hmgapi/mods/egmp-aa-ev/META-HMGAPI"
+printf '{"uuid": "28ad71e0-07c0-8e61-8bf3-380cc71f9280"}\n' > "$R/data/hmgapi/mods/adb/META-HMGAPI/manifest.json"
+printf '{"uuid": "839375d3-8aea-884a-a9e9-c79964fe5d88"}\n' > "$R/data/hmgapi/mods/egmp-aa-ev/META-HMGAPI/manifest.json"
+
+# Stub USB files and head-unit binaries (nemesis, hmgapid, getprop, pm, am, reboot, sync)
 : > "$USB/packages/hmgapi.zip"
 for m in 01-wireless-carplay-aa 02-adb 03-aa-dpi 04-egmp-aa-ev 05-hmgapi-comfort 06-light-vibes; do
     : > "$USB/HMGAPI/updates/$m.hmgapi.zip"
@@ -177,8 +183,14 @@ has "uninstalled evergreen.app APK" "pm-uninstall evergreen.app" "$EVENTS"
 has "fallback pm install -r used /data/hmgapi/HmgApi.apk" "pm-install install -r $R/data/hmgapi/HmgApi.apk" "$EVENTS"
 check "cleared pending public/HmgApi.apk on fallback success" "no" "$([ -f "$R/data/hmgapi/public/HmgApi.apk" ] && echo yes || echo no)"
 has "removed legacy leafia-helper mod from /data/hmgapi/mods" "hmgapid engine remove leafia-helper --from-nemesis" "$EVENTS"
+has "migrated old suite-signed adb to official VysseCodes UUID" "hmgapid engine remove adb --from-nemesis" "$EVENTS"
+hasnt "kept already-matching AwsomeFox egmp-aa-ev without remove" "hmgapid engine remove egmp-aa-ev" "$EVENTS"
 has "ensured block_ambient_light is off" "hmgapid allow block_ambient_light off" "$EVENTS"
 has "installed 06-light-vibes.hmgapi.zip" "06-light-vibes.hmgapi.zip" "$EVENTS"
+
+check "seeded adb.json has usb=false" \
+    '{"usb": false}' \
+    "$(cat "$R/data/hmgapi/settings/adb.json")"
 
 check "migrated aa-dpi.json has tap_limit=false and dpi=200" \
     '{"dpi": 200, "real_dpi": "same", "tap_limit": false, "video_window": 6}' \

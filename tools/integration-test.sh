@@ -109,18 +109,31 @@ do
         set -e
     }
 
-    # Install every signed mod zip in order, verifying trusted author list recognition as lemoyneiv
+    # Seed suite safe USB host-mode setting for official Open-HMG adb package (mirroring usb/NEMESIS.sh)
+    printf '{"usb": false}\n' > "$R/data/hmgapi/settings/adb.json"
+
+    # Install every signed mod zip in order, verifying each package's expected author key
     for z in "$UPDATES_DIR"/*.hmgapi.zip; do
         eng install "$z" --from-nemesis
         check "$P: install ${z##*/}" 0 "$rc"
-        has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" "author   lemoyneiv (author key 28ad71e0-07c0-8e61-8bf3-380cc71f9280, on HMG-API's trusted author list)" "$out"
+        case "${z##*/}" in
+            02-adb.hmgapi.zip)
+                has "$P: ${z##*/} signed by official VysseCodes key" \
+                    "author   VysseCodes (author key 7251ce71-a146-8a1e-958b-dbffc6af7359, on HMG-API's trusted author list)" "$out" ;;
+            04-egmp-aa-ev.hmgapi.zip)
+                has "$P: ${z##*/} signed by official AwsomeFox key" \
+                    "author key 839375d3-8aea-884a-a9e9-c79964fe5d88" "$out" ;;
+            *)
+                has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" \
+                    "author   lemoyneiv (author key 28ad71e0-07c0-8e61-8bf3-380cc71f9280, on HMG-API's trusted author list)" "$out" ;;
+        esac
     done
 
     mod_authors() {
         python3 -c 'import json,sys; print(", ".join(json.load(open(sys.argv[1]))["authors"]))' "$R/data/hmgapi/mods/$1/mod.json"
     }
     check "$P: wireless-carplay-aa authors" "VysseCodes, lemoyneiv" "$(mod_authors wireless-carplay-aa)"
-    check "$P: adb authors" "VysseCodes, lemoyneiv" "$(mod_authors adb)"
+    check "$P: adb official Open-HMG author preserved" "VysseCodes" "$(mod_authors adb)"
     check "$P: aa-dpi authors" "eliotwass, AwsomeFox, lemoyneiv" "$(mod_authors aa-dpi)"
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
@@ -142,7 +155,7 @@ do
     has "$P: audio converter added" "/system/lib/libleafiaaac.so" "$out"
     has "$P: CarPlay identity serializer added" "/system/lib/libcarplayidentity.so" "$out"
     has "$P: hotspot feature xml added" '<feature name="com.hkmc.software.wifihotspot" />' "$(cat "$R/system/etc/permissions/com.hkmc.software.wifihotspot.xml" 2>/dev/null)"
-    check "$P: ADB defaults keep USB in host mode (host,adb)" "host,adb" \
+    check "$P: ADB seeded settings keep USB in host mode (host,adb)" "host,adb" \
         "$(grep '^prop/persist.sys.usb.config=' "$R/settings.txt" | cut -d= -f2-)"
     check "$P: Engineering Mode eth0 ADB switch turned off" "0" \
         "$(grep '^prop/persist.service.adb.tcp.enable=' "$R/settings.txt" | cut -d= -f2-)"
@@ -190,7 +203,14 @@ PY
 done
 
 if [ -d "$STANDALONE_DIR" ]; then
-    CVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$HERE/hmgapi-comfort/hmgapi-comfort/mod.json")
+    CVER=$(python3 - "$STANDALONE_DIR" <<'PY'
+import glob, json, sys, zipfile
+matches = sorted(glob.glob(sys.argv[1] + "/hmgapi-comfort-v*.hmgapi.zip"))
+assert matches, "missing standalone hmgapi-comfort archive"
+with zipfile.ZipFile(matches[-1]) as z:
+    print(json.loads(z.read("mod.json"))["version"])
+PY
+)
     echo "== Standalone Comfort (${CVER}) & Light Vibes (0.6.9) package verification =="
     for spec in \
         "hmgapi-comfort:${CVER}" \
