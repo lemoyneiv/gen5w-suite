@@ -189,12 +189,6 @@ PY
     check "$P: wireless-carplay-aa published default projection_focus=True" \
         "projection_focus=True" "$WL_FOCUS"
 
-    # Verify Home Screen Tile Manager CLI (launcher-tiles-set + launcher-tiles)
-    eng launcher-tiles-set '{"compact_gaps":true,"hidden":["com.hkmc.valet/.ValetActivity"]}'
-    check "$P: launcher-tiles-set succeeds" 0 "$rc"
-    has "$P: launcher-tiles-set saves 1 hidden tile" "saved: 1 hidden" "$out"
-    check "$P: public/launcher-tiles.json written" "yes" "$([ -f "$R/data/hmgapi/public/launcher-tiles.json" ] && echo yes || echo no)"
-
     # Restore everything back to stock and verify byte-identical /system
     eng restore
     check "$P: engine restore succeeds" 0 "$rc"

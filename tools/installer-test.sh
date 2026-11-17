@@ -150,9 +150,11 @@ exit 0
 EOF
 chmod 755 "$BIN/getprop" "$BIN/setprop" "$BIN/pm" "$BIN/am"
 
-mkdir -p "$R/data/hmgapi/public"
+mkdir -p "$R/data/hmgapi/public" "$R/data/hmgapi/hook"
 : > "$R/data/hmgapi/HmgApi.apk"
 : > "$R/data/hmgapi/public/HmgApi.apk"
+echo 4 > "$R/data/hmgapi/hook/starts"
+: > "$R/data/hmgapi/hook/disable"
 
 # Rewrite absolute /data and /system paths in a test copy of usb/NEMESIS.sh to point into $R
 sed -e "s|^export PATH=.*|export PATH=$BIN:/usr/bin:/bin|" \
@@ -182,6 +184,9 @@ has "uninstalled leafia.app APK" "pm-uninstall leafia.app" "$EVENTS"
 has "uninstalled evergreen.app APK" "pm-uninstall evergreen.app" "$EVENTS"
 has "fallback pm install -r used /data/hmgapi/HmgApi.apk" "pm-install install -r $R/data/hmgapi/HmgApi.apk" "$EVENTS"
 check "cleared pending public/HmgApi.apk on fallback success" "no" "$([ -f "$R/data/hmgapi/public/HmgApi.apk" ] && echo yes || echo no)"
+check "reset Zygote boot guard starts counter to 0" "0" "$(cat "$R/data/hmgapi/hook/starts")"
+check "removed /data/hmgapi/hook/disable" "no" "$([ -e "$R/data/hmgapi/hook/disable" ] && echo yes || echo no)"
+check "created /data/hmgapi/hook/enable" "yes" "$([ -f "$R/data/hmgapi/hook/enable" ] && echo yes || echo no)"
 has "removed legacy leafia-helper mod from /data/hmgapi/mods" "hmgapid engine remove leafia-helper --from-nemesis" "$EVENTS"
 has "migrated old suite-signed adb to official VysseCodes UUID" "hmgapid engine remove adb --from-nemesis" "$EVENTS"
 hasnt "kept already-matching AwsomeFox egmp-aa-ev without remove" "hmgapid engine remove egmp-aa-ev" "$EVENTS"

@@ -2,7 +2,7 @@
 # Gen5W Suite Unified One-Tap Installer (executed by NEMESIS USB Handler as root).
 #
 # 1. Uninstalls legacy/competing standalone NEMESIS packages if installed.
-# 2. Installs or updates HMG-API Core 1.1.1-rc.3 (BLE + VehicleHub + Home Tiles).
+# 2. Installs or updates HMG-API Core 1.1.1-rc.4 (BLE + VehicleHub + QuickBoot).
 # 3. Verifies/enables the car's hook map (260507 + 260903) and pre-grants
 #    owner permissions for comfort and EV preconditioning commands.
 # 4. Installs all signed suite mods (preserving existing user settings across
@@ -141,7 +141,7 @@ if [ "$(getprop sys.boot_completed)" = 1 ]; then
 fi
 rm -rf /data/local/coldstart-heat /data/leafia /data/evergreen >/dev/null 2>&1
 
-# 2. Install or update HMG-API Core 1.1.1-rc.3 via NEMESIS
+# 2. Install or update HMG-API Core 1.1.1-rc.4 via NEMESIS
 if [ -f /data/nemesis/apps/hmgapi/NEMESIS.data ]; then
     msg "Updating HMG-API Core from packages/hmgapi.zip"
     out=$("$NEMESIS" install --update --force --accept-risk "$USB/packages/hmgapi.zip" 2>&1) || fail_install "HMG-API update failed: $out"
@@ -150,6 +150,13 @@ else
     out=$("$NEMESIS" install --accept-risk "$USB/packages/hmgapi.zip" 2>&1) || fail_install "HMG-API install failed: $out"
 fi
 msg "$out"
+
+# Ensure Zygote hook boot guard is cleared and hooks are enabled
+mkdir -p /data/hmgapi/hook
+chmod 700 /data/hmgapi/hook
+echo 0 > /data/hmgapi/hook/starts
+rm -f /data/hmgapi/hook/disable
+: > /data/hmgapi/hook/enable
 
 # Verify HmgApi.apk installed cleanly from 0711 /data/hmgapi/HmgApi.apk when Android is up
 if [ "$(getprop sys.boot_completed)" = 1 ] && [ -f /data/hmgapi/HmgApi.apk ]; then

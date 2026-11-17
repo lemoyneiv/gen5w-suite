@@ -55,8 +55,8 @@ if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
 fi
 
 CORE_APP_KEY="$KEY_DIR/hmgapi-core-app.p12"
-if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.3-nemesis-package.zip" ]; then
-    echo "== Building HMG-API Core 1.1.1-rc.3 & Mod SDK =="
+if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.4-nemesis-package.zip" ]; then
+    echo "== Building HMG-API Core 1.1.1-rc.4 & Mod SDK =="
     (cd "$HMGAPI" && HMGAPI_KEY="$CORE_APP_KEY" ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
 fi
 HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
@@ -356,8 +356,8 @@ type=list
 
 [package.0]
 path=packages/hmgapi.zip
-name=HMG-API Core (${CORE_VER} BLE + VehicleHub + Home Tiles)
-short-desc=Install first: HMG-API runtime, BLE central, Home Screen Tiles, and VehicleHub
+name=HMG-API Core (${CORE_VER} BLE + VehicleHub)
+short-desc=Install first: HMG-API runtime, BLE central, QuickBoot wake, and VehicleHub
 published=${TODAY}
 
 [package.1]
