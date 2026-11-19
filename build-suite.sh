@@ -7,7 +7,7 @@
 #   dist/gen5w-suite-usb.zip                 One-tap NEMESIS execute USB stick (recommended)
 #   dist/gen5w-suite-nemesis-store-usb.zip   Interactive NEMESIS USB Package Store stick (type=list)
 #   dist/gen5w-suite-hmgapi-updates-usb.zip  HMG-API Updates stick (HMGAPI/updates/*.zip)
-#   dist/standalone/*.zip                    Standalone Comfort (1.1.0) & Light Vibes (0.6.9) packages
+#   dist/standalone/*.zip                    Standalone Comfort (1.1.8) & Light Vibes (0.7.0) packages
 #   dist/mods/*.zip                          Individual signed HMG-API + NEMESIS packages
 #   dist/SHA256SUMS                          SHA-256 checksums
 set -e
@@ -55,8 +55,8 @@ if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
 fi
 
 CORE_APP_KEY="$KEY_DIR/hmgapi-core-app.p12"
-if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.4-nemesis-package.zip" ]; then
-    echo "== Building HMG-API Core 1.1.1-rc.4 & Mod SDK =="
+if [ ! -d "$HMGAPI/out/sdk" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.5-nemesis-package.zip" ]; then
+    echo "== Building HMG-API Core 1.1.1-rc.5 & Mod SDK =="
     (cd "$HMGAPI" && HMGAPI_KEY="$CORE_APP_KEY" ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
 fi
 HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
@@ -84,7 +84,7 @@ fetch_upstream() {
         if [ -d "$SUITE_ROOT/../$name/.git" ] && git -C "$SUITE_ROOT/../$name" cat-file -e "$sha^{commit}" 2>/dev/null; then
             git -C "$CACHE_DIR/$name" fetch -q "$SUITE_ROOT/../$name" "$sha"
         else
-            git -C "$CACHE_DIR/$name" fetch -q origin "$sha"
+            git -C "$CACHE_DIR/$name" fetch -q origin "$sha" || git -C "$CACHE_DIR/$name" fetch -q origin --tags '+refs/heads/*:refs/remotes/origin/*'
         fi
     fi
 }
@@ -122,18 +122,20 @@ verify_official_mod() {
     rm -rf "$tmp_dir"
 }
 
-COMFORT_SHA=56ede446df5dc8f9b9d3becbd2926e34a86aeb85
+WIRELESS_SHA=71f6e2f2492290dc0e4b7c4d3092d7d551d11052
+COMFORT_SHA=fae56f8b70976faafffde90316c336f35c8bab65
+LIGHT_VIBES_SHA=dc0704927920e43882f84bc35ef87dbb6eeed9c6
 ADB_TAG=v1.0.1-rc.1
 ADB_VER=1.0.1-rc.1
 ADB_UUID=7251ce71-a146-8a1e-958b-dbffc6af7359
-EGMP_TAG=v0.7.0
-EGMP_VER=0.7.0
+EGMP_TAG=v0.8.2
+EGMP_VER=0.8.2
 EGMP_UUID=839375d3-8aea-884a-a9e9-c79964fe5d88
 
-fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless-cp-aa.git 2af1849bee473d2ae8719b35acf06421e1c4a974
+fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless-cp-aa.git "$WIRELESS_SHA"
 fetch_upstream hmg-aa-dpi            https://github.com/eliotwass/hmg-aa-dpi.git           4222625d25e2776f926cf372ff3220fc3ec6d20c
 fetch_upstream hmgapi-comfort        https://github.com/lemoyneiv/hmgapi-comfort.git       "$COMFORT_SHA"
-fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          6ba86afcdbed3d418f8f0e573541c39ecdacb3bf
+fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          "$LIGHT_VIBES_SHA"
 fetch_upstream tinyalsa              https://github.com/tinyalsa/tinyalsa.git              a7cd26a17fe2add2ff38d2f281ed0b919187a068
 
 fetch_release_asset Open-HMG/HMG-API v1.1.0-rc.3 hmgapi-mod-sdk-1.1.0-rc.3.zip \
@@ -146,10 +148,10 @@ fetch_release_asset Open-HMG/hmgapi-adb "$ADB_TAG" "adb-${ADB_VER}-nemesis-packa
     043ad962e76be25584832919be9a0f6ef401eec882c07a3b301d3b3739503a1a \
     "$REL_CACHE/adb/adb-${ADB_VER}-nemesis-package.zip"
 fetch_release_asset AwsomeFox/egmp-aa-ev-hmg-api "$EGMP_TAG" "egmp-aa-ev-${EGMP_VER}.zip" \
-    ffdce862588f56451f394efb1ee390db03d108b6ab6df9fbe048db4cd6905597 \
+    bbda9d0387a2ed74f0e737f43913fad8c4fbb2d6a9abccabe8b37de2fef14b21 \
     "$REL_CACHE/egmp/egmp-aa-ev-${EGMP_VER}.zip"
 fetch_release_asset AwsomeFox/egmp-aa-ev-hmg-api "$EGMP_TAG" "egmp-aa-ev-${EGMP_VER}-nemesis-package.zip" \
-    48bff09f20d460967ac06307637b140ab86c044230ab7a40cb3d7b0a56fe9573 \
+    cf9f4d6a5aa37b56e68caace636548011cbfb00eabe110d57190531cc9cb10e0 \
     "$REL_CACHE/egmp/egmp-aa-ev-${EGMP_VER}-nemesis-package.zip"
 
 WORK_SRC="$SUITE_ROOT/out/work-src"
@@ -164,10 +166,10 @@ prepare_copy() {
     git -C "$WORK_SRC/$name" clean -fdx >/dev/null
 }
 
-prepare_copy hmgapi-wireless-cp-aa 2af1849bee473d2ae8719b35acf06421e1c4a974
+prepare_copy hmgapi-wireless-cp-aa "$WIRELESS_SHA"
 prepare_copy hmg-aa-dpi            4222625d25e2776f926cf372ff3220fc3ec6d20c
 prepare_copy hmgapi-comfort        "$COMFORT_SHA"
-prepare_copy light-vibes           6ba86afcdbed3d418f8f0e573541c39ecdacb3bf
+prepare_copy light-vibes           "$LIGHT_VIBES_SHA"
 
 mkdir -p "$WORK_SRC/light-vibes/third_party"
 cp -a "$CACHE_DIR/tinyalsa" "$WORK_SRC/light-vibes/third_party/tinyalsa"
@@ -235,7 +237,7 @@ cp "$REL_CACHE/egmp/egmp-aa-ev-${EGMP_VER}.zip"                 "$SUITE_ROOT/dis
 cp "$REL_CACHE/egmp/egmp-aa-ev-${EGMP_VER}-nemesis-package.zip" "$SUITE_ROOT/dist/mods/egmp-aa-ev-v${EGMP_VER}-nemesis-package.zip"
 
 CVER=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$WORK_SRC/hmgapi-comfort/hmgapi-comfort/mod.json")
-COMFORT_REL_SHA=4127162bb713083a610ccd21fd89041d0b66e0f2aad8121b3dd482e1e6da5551
+COMFORT_REL_SHA=80496cd34e42f43577f07498442e7e287f85bd407cf5e5cf867d930a63fa2e05
 echo ""
 echo "=================================================================="
 echo " STEP 6: Building, Testing & Verifying hmgapi-comfort ${CVER} (standalone repo)"
@@ -282,7 +284,7 @@ done
 
 echo ""
 echo "=================================================================="
-echo " STEP 6b: Building, Testing & Signing light-vibes 0.6.9 (intense-effects)"
+echo " STEP 6b: Building, Testing & Signing light-vibes 0.7.0 (intense-effects)"
 echo "=================================================================="
 (
     cd "$WORK_SRC/light-vibes"
@@ -363,7 +365,7 @@ published=${TODAY}
 [package.1]
 path=packages/hmgapi.wireless-carplay-aa.zip
 name=Wireless CarPlay + Android Auto (2.2.1)
-short-desc=Wireless CP/AA (rc.4), cluster/HUD TBT, BT focus guard, freeze & audio fixes
+short-desc=Wireless CP/AA (rc.5), Now Playing, AR HUD/cluster TBT, BT focus guard & freeze fixes
 published=${TODAY}
 
 [package.2]

@@ -135,13 +135,13 @@ index 4f6eb8d..c40b98f 100644
       * The iAP2 server. Turn-by-turn ("tbt"): it offers RouteGuidance to the iPhone only
       * when the car's stepofspec is 999 or more (US/Canada: 105), so HMG-API sets that one
 diff --git a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java
-index 8d3fd53..04e0117 100644
+index 0ce5ce2..00c832d 100644
 --- a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java
 +++ b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/CpTurns.java
-@@ -47,6 +47,25 @@ final class CpTurns {
-     /** last HUD list sent (type, next, road), so an unchanged one isn't resent */
-     int hudType, hudNext;
-     String hudRoad;
+@@ -64,6 +64,25 @@ final class CpTurns {
+     static final int DEST_AHEAD = 112, DEST_RIGHT = 113, DEST_LEFT = 114;
+     /** how far before a maneuver the car's navigation switches to its turn format and starts the bar (m) */
+     static final int GUIDE_WINDOW = 457;
 +    /** the main turn on the cluster: component, maneuver index, its type and icon (shownIcon 0: nothing of ours shown) */
 +    int shownId, shownIndex, shownType, shownIcon;
 +    /**
@@ -164,7 +164,7 @@ index 8d3fd53..04e0117 100644
  
      CpTurns(Context context, Cluster cluster, Runnable restart) {
          this.context = context;
-@@ -233,12 +252,49 @@ final class CpTurns {
+@@ -250,12 +269,49 @@ final class CpTurns {
      /** the iAP2 session ended (DiPO e/u.disconnected) */
      void disconnected() {
          reset();
@@ -215,7 +215,7 @@ index 8d3fd53..04e0117 100644
          hudBlank();
      }
  
-@@ -267,7 +323,7 @@ final class CpTurns {
+@@ -284,7 +340,7 @@ final class CpTurns {
              if (was == null || was.equals(s)) return;
              Dipo.log("CarPlay: route guidance source changed from " + was + " to " + s + ", clearing turn-by-turn");
              reset();
@@ -224,7 +224,7 @@ index 8d3fd53..04e0117 100644
              if (restart != null) new Thread(restart, "hmgapi-cp-rg-restart").start();
              return;
          }
-@@ -280,6 +336,7 @@ final class CpTurns {
+@@ -297,6 +353,7 @@ final class CpTurns {
              stop();
              return;
          }
@@ -232,7 +232,7 @@ index 8d3fd53..04e0117 100644
          int[] list = u.list == null ? null : u.list.clone();
          float dist = 0f;
          if (u.nextStr != null && !u.nextStr.equals("")) {
-@@ -290,7 +347,10 @@ final class CpTurns {
+@@ -307,7 +364,10 @@ final class CpTurns {
                  dist = 0f;
              }
          }
@@ -244,7 +244,7 @@ index 8d3fd53..04e0117 100644
          LinkedHashMap<Integer, Maneuver> m = maneuvers.get(id);
          if (m == null || list == null) return;
          Maneuver x = m.get(list[0]);
-@@ -304,17 +364,64 @@ final class CpTurns {
+@@ -321,10 +381,38 @@ final class CpTurns {
              default: unit = Cluster.UNIT_M; break;
          }
          int icon = icon(x.type, x.side, x.junction, x.exit, u.state);
@@ -281,10 +281,19 @@ index 8d3fd53..04e0117 100644
 +                return;
 +            }
 +        }
-+        logTurn(id, list[0], x, "icon " + icon + " (" + how + ")", dist, unit);
 +        // no HUD list for these (sendHud): blank the last turn's, once
 +        if (icon < 64 && hudType != -1) hudBlank();
-         cluster.tbtInfo(icon, 0, 0f, dist, 0, 0, unit, 0, 0);
+         int type = icon, dir = 0, bar = 0;
+         if (standardTurns) {
+             // the phone's distance to this maneuver in meters (item 10), once it has sent one
+@@ -334,8 +422,14 @@ final class CpTurns {
+             dir = s[1];
+             bar = s[2];
+             logTurn(x, icon);
++        } else {
++            logTurn(id, list[0], x, "icon " + icon + " (" + how + ")", dist, unit);
+         }
+         cluster.tbtInfo(type, 0, dir, dist, 0, 0, unit, bar, 0);
 +        shownId = id;
 +        shownIndex = list[0];
 +        shownType = x.type;
@@ -292,9 +301,11 @@ index 8d3fd53..04e0117 100644
          sendHud(icon, id, u);
          sendHudDist(dist, unit);
          sendTrip(u);
-         sendAhead(id, u);
+@@ -518,23 +612,88 @@ final class CpTurns {
+         }
      }
  
+-    /** an upcoming turn's small icon (HUD list and turn list): 64 none, 65 straight, 66-68 right, 69-71 left, 72/73 U-turn */
 +    /** last turn logged, without the distance: a new line only when the maneuver or what's shown changes */
 +    String logged;
 +
@@ -309,14 +320,6 @@ index 8d3fd53..04e0117 100644
 +    /** the cluster's main turn with no arrow */
 +    static final int NO_INFO = 1;
 +
-     /**
-      * The cluster icon for a maneuver: iAP2 ManeuverType, driving side (0 right-hand
-      * traffic, 1 left), junction type (0 intersection, 1 roundabout) and exit angle, as
-@@ -391,23 +498,74 @@ final class CpTurns {
-         }
-     }
- 
--    /** an upcoming turn's small icon (HUD list and turn list): 64 none, 65 straight, 66-68 right, 69-71 left, 72/73 U-turn */
 +    /**
 +     * An upcoming turn's icon (HUD list and the turns ahead): the table's, else the nearest
 +     * (fallback), else straight (65). Never 64: the cluster draws its spinner for it, and far
@@ -404,13 +407,13 @@ index 8d3fd53..04e0117 100644
  
      /** the HUD's list frame (0xF2): count, this icon, the next turn's icon, 0, road after this turn (UTF-16LE) */
 diff --git a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java
-index 5d14e08..86560ae 100644
+index 3804c37..f22e01d 100644
 --- a/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java
 +++ b/wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java
-@@ -43,12 +43,17 @@ import hmgapi.hook.Points;
-  * for it: its own wireless CarPlay off (that's Hyundai's, not this one), its iAP2
-  * listener ignoring the bridge's sessions, the reconnect crash fix and the first-connect
-  * notice fix.
+@@ -46,12 +46,17 @@ import hmgapi.hook.Points;
+  *
+  * Now Playing ("now_playing", with the bridge): song, artist and album art on wireless
+  * CarPlay, which DiPO only asks the phone for on USB (nowPlaying).
 + *
 + * Picture ("picture"): asks the phone for a new key frame when the CarPlay picture
 + * stalls, which the stock app never does (Keyframes has the why and the when).
@@ -425,7 +428,7 @@ index 5d14e08..86560ae 100644
      /** iAP2 listener type for route guidance (notifications 120, 121, 122) */
      static final int LISTENER_ROUTE_GUIDANCE = 4096;
      static final int RG_UPDATE = 120, RG_MANEUVER = 121, RG_LANES = 122;
-@@ -87,6 +92,14 @@ public final class Dipo {
+@@ -99,6 +104,14 @@ public final class Dipo {
              m.nativePatch(a, "libCarPlayAudio.so");   // offer AAC and Opus on Wi-Fi
              m.nativePatch(a, "libCarPlayUtils.so");   // its AudioConverter calls go to libleafiaaac.so
          }
@@ -438,12 +441,12 @@ index 5d14e08..86560ae 100644
 +            }
 +        }
          if (tbt) turnByTurn();
-         if (bridge) bridge();
          if (!tbt && !bridge) return;
-@@ -129,6 +142,30 @@ public final class Dipo {
-                 restartRouteGuidance();
-             }
+         rgWatch();
+@@ -146,6 +159,30 @@ public final class Dipo {
          });
+         turns.standardTurns = mod.settingBoolean("tbt_standard", false);
+         if (turns.standardTurns) log("CarPlay: turns in the car's own format near a maneuver (standard turns)");
 +        turns.noIcon = mod.settingString("tbt_no_icon", "straight");
 +        turns.route = new CpTurns.Route() {
 +            @Override
@@ -471,7 +474,7 @@ index 5d14e08..86560ae 100644
          rg = new RgListener();
          mod.hook(app.classLoader, "dipo.iap2_proxy.stop_route_guidance", new MethodHook() {
              @Override
-@@ -142,7 +179,7 @@ public final class Dipo {
+@@ -161,7 +198,7 @@ public final class Dipo {
                  });
              }
          });
@@ -480,7 +483,7 @@ index 5d14e08..86560ae 100644
      }
  
      static void post(Runnable r) {
-@@ -217,6 +254,171 @@ public final class Dipo {
+@@ -238,6 +275,171 @@ public final class Dipo {
          }
      }
  
@@ -787,7 +790,7 @@ index 0000000..4b659d5
 +    }
 +}
 diff --git a/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java b/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java
-index 644fd74..060f7b6 100644
+index c0e6af4..b9790b1 100644
 --- a/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java
 +++ b/wireless-carplay-aa/tools/cpturns/test/hmgapi/mods/wireless/dipo/CpTurnsTest.java
 @@ -89,7 +89,9 @@ public final class CpTurnsTest {
@@ -977,9 +980,9 @@ index 644fd74..060f7b6 100644
                          && CpTurns.laneIcon(270) == 7);
          indiaTurns();
 +        driveTurns();
+         standardTurns();
          System.exit(fail);
      }
- }
 diff --git a/wireless-carplay-aa/tools/picture/test.sh b/wireless-carplay-aa/tools/picture/test.sh
 new file mode 100755
 index 0000000..9cfd596

@@ -138,7 +138,7 @@ do
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
     check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
-    check "$P: light-vibes version 0.6.9" "0.6.9" \
+    check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
 
     # Plan across ALL mods simultaneously
@@ -205,10 +205,10 @@ with zipfile.ZipFile(matches[-1]) as z:
     print(json.loads(z.read("mod.json"))["version"])
 PY
 )
-    echo "== Standalone Comfort (${CVER}) & Light Vibes (0.6.9) package verification =="
+    echo "== Standalone Comfort (${CVER}) & Light Vibes (0.7.0) package verification =="
     for spec in \
         "hmgapi-comfort:${CVER}" \
-        "light-vibes:0.6.9"
+        "light-vibes:0.7.0"
     do
         mid=${spec%:*}
         mver=${spec#*:}
