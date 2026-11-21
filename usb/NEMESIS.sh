@@ -2,11 +2,12 @@
 # Gen5W Suite Unified One-Tap Installer (executed by NEMESIS USB Handler as root).
 #
 # 1. Uninstalls legacy/competing standalone NEMESIS packages if installed.
-# 2. Installs or updates HMG-API Core 1.1.1-rc.5 (BLE + VehicleHub + QuickBoot).
+# 2. Installs or updates HMG-API Core 1.1.1-rc.8 (Home Wi-Fi + BLE + VehicleHub + QuickBoot).
 # 3. Verifies/enables the car's hook map (260507 + 260903) and pre-grants
 #    owner permissions for comfort and EV preconditioning commands.
 # 4. Installs all signed suite mods (preserving existing user settings across
-#    author-key migrations) and runs a single atomic `hmgapid engine apply`.
+#    author-key migrations), seeds hmgapi-openlink into overrides.allow_cellular,
+#    and runs a single atomic `hmgapid engine apply`.
 # 5. Syncs mod APKs and NEMESIS Manager package listings, then prompts for one
 #    head-unit restart.
 
@@ -141,7 +142,7 @@ if [ "$(getprop sys.boot_completed)" = 1 ]; then
 fi
 rm -rf /data/local/coldstart-heat /data/leafia /data/evergreen >/dev/null 2>&1
 
-# 2. Install or update HMG-API Core 1.1.1-rc.5 via NEMESIS
+# 2. Install or update HMG-API Core 1.1.1-rc.8 via NEMESIS
 if [ -f /data/nemesis/apps/hmgapi/NEMESIS.data ]; then
     msg "Updating HMG-API Core from packages/hmgapi.zip"
     out=$("$NEMESIS" install --update --force --accept-risk "$USB/packages/hmgapi.zip" 2>&1) || fail_install "HMG-API update failed: $out"
@@ -230,7 +231,8 @@ if [ -f "$USB/HMGAPI/RESET_SETTINGS" ]; then
           /data/hmgapi/settings/aa-dpi.json \
           /data/hmgapi/settings/egmp-aa-ev.json \
           /data/hmgapi/settings/hmgapi-comfort.json \
-          /data/hmgapi/settings/light-vibes.json
+          /data/hmgapi/settings/light-vibes.json \
+          /data/hmgapi/settings/.openlink_cellular_seeded
 elif [ -f /data/hmgapi/mods/aa-dpi/mod.json ] && grep -q '"0\.2\.' /data/hmgapi/mods/aa-dpi/mod.json 2>/dev/null; then
     msg "Upgrading aa-dpi from 0.2.x -> 0.3.0: applying DPI 200, tap_limit=false, 60fps window"
     echo '{"dpi": 200, "real_dpi": "same", "tap_limit": false, "video_window": 6}' > /data/hmgapi/settings/aa-dpi.json
@@ -280,6 +282,54 @@ install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
 install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"          "$EGMP_UUID"
 install_suite_mod hmgapi-comfort      "$USB/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"      "$SUITE_UUID"
 install_suite_mod light-vibes         "$USB/HMGAPI/updates/06-light-vibes.hmgapi.zip"         "$SUITE_UUID"
+
+# Seed hmgapi-openlink into hmgapi.json overrides.allow_cellular once (toggleable anytime in Settings > Home Wi-Fi > Mobile data)
+if [ ! -f /data/hmgapi/settings/.openlink_cellular_seeded ]; then
+    msg "Seeding hmgapi-openlink into /data/hmgapi/settings/hmgapi.json overrides.allow_cellular"
+    HJ=/data/hmgapi/settings/hmgapi.json
+    hj=""
+    if [ -f "$HJ" ]; then
+        while IFS= read -r l || [ -n "$l" ]; do
+            hj="$hj$l"
+        done < "$HJ"
+    fi
+    case "$hj" in
+        *'"allow_cellular"'*)
+            ac_tail=${hj#*\"allow_cellular\"*\[}
+            ac_body=${ac_tail%%\]*}
+            case "$ac_body" in
+                *'"hmgapi-openlink"'*) ;;
+                *'"'*)
+                    ac_pre=${hj%%\"allow_cellular\"*}
+                    ac_after=${hj#*\"allow_cellular\"}
+                    ac_open=${ac_after#*\[}
+                    hj="${ac_pre}\"allow_cellular\": [\"hmgapi-openlink\", ${ac_open}" ;;
+                *)
+                    ac_pre=${hj%%\"allow_cellular\"*}
+                    ac_after=${hj#*\"allow_cellular\"}
+                    ac_open=${ac_after#*\[}
+                    hj="${ac_pre}\"allow_cellular\": [\"hmgapi-openlink\"${ac_open}" ;;
+            esac ;;
+        *'"overrides"'*)
+            ov_pre=${hj%%\"overrides\"*}
+            ov_after=${hj#*\"overrides\"}
+            ov_open=${ov_after#*\{}
+            ov_trim=${ov_open#"${ov_open%%[! ]*}"}
+            case "$ov_trim" in
+                \}*) hj="${ov_pre}\"overrides\": {\"allow_cellular\": [\"hmgapi-openlink\"]${ov_trim}" ;;
+                *)   hj="${ov_pre}\"overrides\": {\"allow_cellular\": [\"hmgapi-openlink\"], ${ov_open}" ;;
+            esac ;;
+        *:*\})
+            base=${hj%\}}
+            hj="${base}, \"overrides\": {\"allow_cellular\": [\"hmgapi-openlink\"]}}" ;;
+        *)
+            hj='{"updates": false, "overrides": {"allow_cellular": ["hmgapi-openlink"]}}' ;;
+    esac
+    echo "$hj" > "$HJ"
+    chmod 600 "$HJ"
+    : > /data/hmgapi/settings/.openlink_cellular_seeded
+    chmod 600 /data/hmgapi/settings/.openlink_cellular_seeded
+fi
 
 # 5. Single atomic engine apply + mod APKs + NEMESIS package listing sync
 msg "Applying all enabled mods in a single transaction"

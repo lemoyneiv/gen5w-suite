@@ -85,9 +85,10 @@ echo "evergreen-uninstalled \$*" >> "$T/events.log"
 rm -f "$R/system/bin/app_process.evergreen-stock"
 EOF
 
-# Existing aa-dpi 0.2.1 with old settings
+# Existing aa-dpi 0.2.1 with old settings + existing hmgapi.json with updates=false & ignore_system
 printf '{"id": "aa-dpi", "version": "0.2.1"}\n' > "$R/data/hmgapi/mods/aa-dpi/mod.json"
 printf '{"dpi": 240, "tap_limit": true}\n' > "$R/data/hmgapi/settings/aa-dpi.json"
+printf '{\n  "updates": false,\n  "overrides": {\n    "ignore_system": ["wireless-carplay-aa"]\n  }\n}\n' > "$R/data/hmgapi/settings/hmgapi.json"
 
 # Existing adb signed by old suite key (should be removed/migrated to VysseCodes UUID) +
 # existing egmp-aa-ev already signed by AwsomeFox UUID (should NOT be removed)
@@ -200,5 +201,36 @@ check "seeded adb.json has usb=false" \
 check "migrated aa-dpi.json has tap_limit=false and dpi=200" \
     '{"dpi": 200, "real_dpi": "same", "tap_limit": false, "video_window": 6}' \
     "$(cat "$R/data/hmgapi/settings/aa-dpi.json")"
+
+HMGAPI_JSON_PARSED=$(python3 - "$R/data/hmgapi/settings/hmgapi.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+ov = d.get("overrides", {})
+print(f"updates={d.get('updates')} ignore_system={ov.get('ignore_system')} allow_cellular={ov.get('allow_cellular')}")
+PY
+)
+check "hmgapi.json non-destructively merges hmgapi-openlink into overrides.allow_cellular" \
+    "updates=False ignore_system=['wireless-carplay-aa'] allow_cellular=['hmgapi-openlink']" \
+    "$HMGAPI_JSON_PARSED"
+
+# Simulate owner turning hmgapi-openlink OFF in Settings > Home Wi-Fi > Mobile data, then re-running NEMESIS.sh
+printf '{"updates": false}\n' > "$R/data/hmgapi/settings/hmgapi.json"
+sh "$USB/NEMESIS.sh" >/dev/null
+check "owner mobile-data opt-out preserved across subsequent suite installs" \
+    '{"updates": false}' \
+    "$(cat "$R/data/hmgapi/settings/hmgapi.json")"
+
+# Simulate HMGAPI/RESET_SETTINGS on USB re-seeding hmgapi-openlink
+: > "$USB/HMGAPI/RESET_SETTINGS"
+sh "$USB/NEMESIS.sh" >/dev/null
+RESET_PARSED=$(python3 - "$R/data/hmgapi/settings/hmgapi.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+print(d.get("overrides", {}).get("allow_cellular"))
+PY
+)
+check "RESET_SETTINGS re-seeds hmgapi-openlink into overrides.allow_cellular" \
+    "['hmgapi-openlink']" \
+    "$RESET_PARSED"
 
 exit "$fail"

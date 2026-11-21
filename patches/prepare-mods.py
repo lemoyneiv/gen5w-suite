@@ -5,18 +5,20 @@ working copies of the three patched HMG-API mods (while `adb` and `egmp-aa-ev`
 consume unmodified official upstream-signed release archives and `hmgapi-comfort`
 builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
 
-  1. wireless-carplay-aa (2.2.1 on Open-HMG v2.2.0-rc.5):
+  1. wireless-carplay-aa (2.2.2 on Open-HMG v2.2.0-rc.8 + #94):
      - PR #16 subset: Keyframes IDR screen-freeze recovery, CpTurns highway/
-       rotary/stale-arrow fixes (composed with rc.5 #33 standard turns), and
+       rotary/stale-arrow fixes (composed with rc.8 #33 standard turns), and
        post-route Compass replay (NO Watchdog).
      - PR #28: opt-in wifi_direct part (off by default).
      - PR #56: Projection Focus Arbitrator (FocusGuard / FocusPolicy), enabled by
        default in Gen5W Suite so Phone Projection wins startup/connect focus races
        against Bluetooth Audio while preserving FM/AM/SiriusXM Radio, passenger BT
        streaming after startup, and reverse/AVM cameras.
-     - Upstream v2.2.0-rc.5 already provides PR #2, #33, #51, #54, #55, #58
-       (NEEV/NEEV23/NEEV23SE 260507+260903, enhanced.projection conflict,
-       atomic leafiaaac.c + LPCM bitsPerChannel==0, CarPlay Now Playing & AR HUD).
+     - Upstream v2.2.0-rc.8 + #94 already provides PR #2, #33, #51, #54, #55, #58,
+       #84, #86, #94 (NEEV/NEEV23/NEEV23SE 260507+260903, enhanced.projection
+       conflict, atomic leafiaaac.c + LPCM bitsPerChannel==0, CarPlay Now Playing &
+       AR HUD, CarPlay log switch, "connect a phone" popup Settings fix, and #94
+       revert of #69).
   2. aa-dpi (0.3.0):
      - nemesis_conflicts: ["aa.dpi"], defaults (dpi=200, tap_limit=false, video_window=6).
   3. light-vibes (0.7.0):
@@ -58,7 +60,7 @@ def replace_exact(path: Path, old: str, new: str, label: str) -> None:
 
 
 def patch_wireless(repo: Path) -> None:
-    print("== Preparing wireless-carplay-aa 2.2.1 (on Open-HMG v2.2.0-rc.5)")
+    print("== Preparing wireless-carplay-aa 2.2.2 (on Open-HMG v2.2.0-rc.8 + #94)")
     patch_file = PATCH_DIR / "wireless-pr16-no-watchdog.patch"
     run(["git", "apply", str(patch_file)], cwd=repo)
 
@@ -73,19 +75,19 @@ def patch_wireless(repo: Path) -> None:
     ).read_text(encoding="utf-8"), "Expected upstream PR #2 hook"
     assert "bridge_watchdog" not in dsrc.lower()
 
-    # Verify upstream v2.2.0-rc.5 already includes PR #54, #55, #58
+    # Verify upstream v2.2.0-rc.8 + #94 already includes PR #54, #55, #58, #86
     assert (repo / "wireless-carplay-aa/tools/leafiaaac/test.sh").exists(), "Expected upstream PR #55 leafiaaac test"
     test_sh_text = (repo / "wireless-carplay-aa/test.sh").read_text(encoding="utf-8")
     assert '"hmgapi@>=1.0,!wireless.projection,!projection.tbt,!enhanced.projection"' in test_sh_text
 
-    # Update mod.json (preserve upstream v2.2.0-rc.5 system matrix, hotspot, CarPlay identity, and conflicts)
+    # Update mod.json (preserve upstream v2.2.0-rc.8 system matrix, hotspot, CarPlay identity, popup hook, and conflicts)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "2.2.1"
+    mod["version"] = "2.2.2"
     mod["hmgapi"] = ">=1.1.0"
-    assert mod.get("wifi") == {"hotspot": True}, f"Expected wifi.hotspot in rc.5 mod.json, got {mod.get('wifi')}"
-    assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in rc.5 mod.json"
-    assert "enhanced.projection" in mod.get("nemesis_conflicts", []), "Expected enhanced.projection in rc.5 mod.json"
+    assert mod.get("wifi") == {"hotspot": True}, f"Expected wifi.hotspot in rc.8 mod.json, got {mod.get('wifi')}"
+    assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in rc.8 mod.json"
+    assert "enhanced.projection" in mod.get("nemesis_conflicts", []), "Expected enhanced.projection in rc.8 mod.json"
     add_coauthor(mod)
 
     if not any(p.get("id") == "wifi_direct" for p in mod["parts"]):
@@ -240,6 +242,7 @@ def patch_wireless(repo: Path) -> None:
         if (GPM.equals(app.packageName) && mod.settingBoolean("usb_drives", true)) usbDrives(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
+        if (SYSTEM_POPUP.equals(app.packageName) && mod.settingBoolean("menu", true)) popupSettings(mod, app);
         if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true))) dipo(mod, app);
     }""",
         """    @Override
@@ -251,6 +254,7 @@ def patch_wireless(repo: Path) -> None:
         if (GPM.equals(app.packageName) && mod.settingBoolean("projection_focus", true)) FocusGuard.gpm(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
+        if (SYSTEM_POPUP.equals(app.packageName) && mod.settingBoolean("menu", true)) popupSettings(mod, app);
         if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true) || mod.settingBoolean("projection_focus", true))) dipo(mod, app);
     }""",
         "Wireless.appLoaded",

@@ -109,8 +109,9 @@ do
         set -e
     }
 
-    # Seed suite safe USB host-mode setting for official Open-HMG adb package (mirroring usb/NEMESIS.sh)
+    # Seed suite safe USB host-mode setting + OpenLink cellular allowlist (mirroring usb/NEMESIS.sh)
     printf '{"usb": false}\n' > "$R/data/hmgapi/settings/adb.json"
+    printf '{"updates": false, "overrides": {"allow_cellular": ["hmgapi-openlink"]}}\n' > "$R/data/hmgapi/settings/hmgapi.json"
 
     # Install every signed mod zip in order, verifying each package's expected author key
     for z in "$UPDATES_DIR"/*.hmgapi.zip; do
@@ -141,11 +142,12 @@ do
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
 
-    # Plan across ALL mods simultaneously
+    # Plan across ALL mods simultaneously (verify pre-seeded hmgapi-openlink causes 0 warnings before OpenLink is installed)
     eng plan
     check "$P: multi-mod plan succeeds with 0 problems" 0 "$rc"
     hasnt "$P: no mod refuses or fails to load hooks" "won't load" "$out"
     hasnt "$P: no hook conflicts" "conflict" "$out"
+    hasnt "$P: pre-seeded uninstalled hmgapi-openlink emits no cellular warning" "hmgapi-openlink: may use the car's cellular link" "$out"
     has "$P: gpm.sensor_source.init shared cleanly (aa-dpi + egmp-aa-ev + wireless)" "wireless-carplay-aa (observe)" "$out"
     has "$P: gpm.navigation_status.next_turn shared cleanly (wireless + egmp)" "gpm.navigation_status.next_turn: " "$out"
 
@@ -154,6 +156,7 @@ do
     check "$P: single atomic apply succeeds" 0 "$rc"
     has "$P: audio converter added" "/system/lib/libleafiaaac.so" "$out"
     has "$P: CarPlay identity serializer added" "/system/lib/libcarplayidentity.so" "$out"
+    has "$P: CarPlay log switch added" "/system/lib/libcarplaylog.so" "$out"
     has "$P: hotspot feature xml added" '<feature name="com.hkmc.software.wifihotspot" />' "$(cat "$R/system/etc/permissions/com.hkmc.software.wifihotspot.xml" 2>/dev/null)"
     check "$P: ADB seeded settings keep USB in host mode (host,adb)" "host,adb" \
         "$(grep '^prop/persist.sys.usb.config=' "$R/settings.txt" | cut -d= -f2-)"
@@ -166,6 +169,16 @@ do
     has "$P: light-vibes lights service scheduled" "light-vibes lights" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: Comfort.apk companion app scheduled" "dev.lemoyne.comfort hmgapi-comfort" "$(cat "$R/data/hmgapi/state/apps.txt")"
     has "$P: LightVibes.apk companion app scheduled" "lightvibes.app light-vibes" "$(cat "$R/data/hmgapi/state/apps.txt")"
+    has "$P: suite mods kept off cellular by default" "block hmgapi-comfort" "$(cat "$R/data/hmgapi/state/mods-net.txt")"
+
+    # Verify that once hmgapi-openlink is installed alongside the suite, pre-seeded allow_cellular grants LTE automatically
+    mkdir -p "$R/data/hmgapi/mods/hmgapi-openlink"
+    printf '{"id": "hmgapi-openlink", "version": "1.0.0"}\n' > "$R/data/hmgapi/mods/hmgapi-openlink/mod.json"
+    eng publish-state
+    has "$P: installed hmgapi-openlink automatically granted allow_cellular" "allow hmgapi-openlink" "$(cat "$R/data/hmgapi/state/mods-net.txt")"
+    has "$P: installed hmgapi-openlink service group is 0 (unrestricted)" "hmgapi-openlink 0" "$(cat "$R/data/hmgapi/state/service-gids.txt")"
+    rm -rf "$R/data/hmgapi/mods/hmgapi-openlink"
+    eng publish-state
 
     AADPI_DEFAULTS=$(python3 - "$R/data/hmgapi/public/state.json" <<'PY'
 import json, sys
