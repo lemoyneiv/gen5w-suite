@@ -139,6 +139,8 @@ do
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
     check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
+    check "$P: wireless-carplay-aa version 2.2.3" "2.2.3" \
+        "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
 
@@ -150,10 +152,16 @@ do
     hasnt "$P: pre-seeded uninstalled hmgapi-openlink emits no cellular warning" "hmgapi-openlink: may use the car's cellular link" "$out"
     has "$P: gpm.sensor_source.init shared cleanly (aa-dpi + egmp-aa-ev + wireless)" "wireless-carplay-aa (observe)" "$out"
     has "$P: gpm.navigation_status.next_turn shared cleanly (wireless + egmp)" "gpm.navigation_status.next_turn: " "$out"
+    has "$P: wifi.projection AP keeper planned" "the projection AP up from boot, once each boot, unless a Wi-Fi client is on [wireless-carplay-aa]" "$out"
+
+    eng map
+    has "$P: car hook map active with all 412 points mapped" "hooks on" "$out"
+    hasnt "$P: 0 points unmapped in car hook map" "not mapped" "$out"
 
     # Apply across ALL mods in a single transaction
     eng apply
     check "$P: single atomic apply succeeds" 0 "$rc"
+    has "$P: wireless-carplay-aa hooks NavigationCluster trap-frame points" "framework.navigation_cluster.update_tbt_trap_info_new" "$(cat "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
     has "$P: audio converter added" "/system/lib/libleafiaaac.so" "$out"
     has "$P: CarPlay identity serializer added" "/system/lib/libcarplayidentity.so" "$out"
     has "$P: CarPlay log switch added" "/system/lib/libcarplaylog.so" "$out"
@@ -163,6 +171,8 @@ do
     check "$P: Engineering Mode eth0 ADB switch turned off" "0" \
         "$(grep '^prop/persist.service.adb.tcp.enable=' "$R/settings.txt" | cut -d= -f2-)"
     has "$P: wireless CarPlay bridge prop set" "prop/persist.iap2.iden.wireless=t" "$(cat "$R/settings.txt")"
+    has "$P: wifi.projection ask recorded in state/wifi.txt" "projection wireless-carplay-aa" "$(cat "$R/data/hmgapi/state/wifi.txt")"
+    has "$P: hmgapi wifi boot keeper scheduled in state/services.txt" "hmgapi wifi root boot yes script /data/hmgapi/state/wifi.sh" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: egmp-aa-ev relay service scheduled" "egmp-aa-ev relay" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: hmgapi-comfort fast-path welcome boot service scheduled" "hmgapi-comfort welcome system boot yes jar app/Comfort.apk dev.lemoyne.comfort.WelcomeDaemon" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: hmgapi-comfort starter service scheduled" "hmgapi-comfort starter" "$(cat "$R/data/hmgapi/state/services.txt")"
@@ -196,11 +206,11 @@ import json, sys
 s = json.load(open(sys.argv[1]))["mods"]["wireless-carplay-aa"]["settings"]
 if isinstance(s, list):
     s = {x["key"]: x.get("value", x.get("default")) for x in s}
-print(f"projection_focus={s.get('projection_focus')}")
+print(f"projection_focus={s.get('projection_focus')} tbt_standard={s.get('tbt_standard')} picture={s.get('picture')}")
 PY
 )
-    check "$P: wireless-carplay-aa published default projection_focus=True" \
-        "projection_focus=True" "$WL_FOCUS"
+    check "$P: wireless-carplay-aa published defaults (projection_focus=True, tbt_standard=True, picture=True)" \
+        "projection_focus=True tbt_standard=True picture=True" "$WL_FOCUS"
 
     # Restore everything back to stock and verify byte-identical /system
     eng restore

@@ -5,20 +5,23 @@ working copies of the three patched HMG-API mods (while `adb` and `egmp-aa-ev`
 consume unmodified official upstream-signed release archives and `hmgapi-comfort`
 builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
 
-  1. wireless-carplay-aa (2.2.2 on Open-HMG v2.2.0-rc.8 + #94):
-     - PR #16 subset: Keyframes IDR screen-freeze recovery, CpTurns highway/
-       rotary/stale-arrow fixes (composed with rc.8 #33 standard turns), and
-       post-route Compass replay (NO Watchdog).
-     - PR #28: opt-in wifi_direct part (off by default).
-     - PR #56: Projection Focus Arbitrator (FocusGuard / FocusPolicy), enabled by
-       default in Gen5W Suite so Phone Projection wins startup/connect focus races
-       against Bluetooth Audio while preserving FM/AM/SiriusXM Radio, passenger BT
-       streaming after startup, and reverse/AVM cameras.
-     - Upstream v2.2.0-rc.8 + #94 already provides PR #2, #33, #51, #54, #55, #58,
-       #84, #86, #94 (NEEV/NEEV23/NEEV23SE 260507+260903, enhanced.projection
-       conflict, atomic leafiaaac.c + LPCM bitsPerChannel==0, CarPlay Now Playing &
-       AR HUD, CarPlay log switch, "connect a phone" popup Settings fix, and #94
-       revert of #69).
+  1. wireless-carplay-aa (2.2.3 on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c):
+     - Built on `feat/tbt-overhaul-and-cleanup` (`262554c`, based on Open-HMG
+       `v2.2.0-rc.9`): dynamic native cluster & AR HUD intersection scenes
+       (`tbt_standard` default `true`), `NaviBridge` immediate DisplayType 8 idle
+       compass & heading replay + non-destructive speed-limit trap-frame countdown
+       bar splicing (`updateTBTTrapInfo` / `updateTBTTrapInfoNew`), full Android
+       Auto route & EV charging-stop state decoding (`AaNavState`), Issue #24
+       CarPlay nav-app switch recovery (`recoverFromDipoStop`), `Wifi.projectionAp`
+       (`"wifi": {"projection": true}`), and popup Settings fix across
+       `SYSTEM_POPUP`, `LAUNCHER`, and `SETTINGS_APP`.
+     - PR #16 picture subset: `Keyframes` CarPlay video decoder freeze IDR recovery
+       (`picture`, `picture_periodic`, `picture_period`, NO `Watchdog`).
+     - PR #28: opt-in `wifi_direct` part (off by default).
+     - PR #56: Projection Focus Arbitrator (`FocusGuard` / `FocusPolicy`), enabled
+       by default in Gen5W Suite so Phone Projection wins startup/connect focus
+       races against Bluetooth Audio while preserving FM/AM/SiriusXM Radio,
+       passenger BT streaming after startup, and reverse/AVM cameras.
   2. aa-dpi (0.3.0):
      - nemesis_conflicts: ["aa.dpi"], defaults (dpi=200, tap_limit=false, video_window=6).
   3. light-vibes (0.7.0):
@@ -29,7 +32,6 @@ import argparse
 import json
 import shutil
 import stat
-import subprocess
 import sys
 from pathlib import Path
 
@@ -39,10 +41,6 @@ PATCH_DIR = Path(__file__).resolve().parent
 
 def write_json(path: Path, obj: dict) -> None:
     path.write_text(json.dumps(obj, indent=2) + "\n", encoding="utf-8")
-
-
-def run(cmd, cwd=None) -> None:
-    subprocess.run(cmd, cwd=cwd, check=True)
 
 
 def add_coauthor(mod: dict, author: str = "lemoyneiv") -> None:
@@ -59,48 +57,216 @@ def replace_exact(path: Path, old: str, new: str, label: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
-def patch_wireless(repo: Path) -> None:
-    print("== Preparing wireless-carplay-aa 2.2.2 (on Open-HMG v2.2.0-rc.8 + #94)")
-    patch_file = PATCH_DIR / "wireless-pr16-no-watchdog.patch"
-    run(["git", "apply", str(patch_file)], cwd=repo)
+DIPO_PICTURE_BLOCK = """    static Handler pictureHandler;
+    static Keyframes keyframes;
+    /** forceKeyFrame()'s answers since the last summary, for the log */
+    static final java.util.TreeMap<String, Integer> results = new java.util.TreeMap<String, Integer>();
+    /** a summary in HMG-API's log this often during a session */
+    static final long SUMMARY_MS = 60000;
 
-    # Verify PR #16 Watchdog was never introduced anywhere
+    /** setting picture_period ("5", "10", ...: seconds) */
+    static long periodMs(String v) {
+        try {
+            return Math.max(2, Integer.parseInt(v.trim())) * 1000L;
+        } catch (NumberFormatException e) {
+            return 5000;
+        }
+    }
+    /** DiPO's CarPlayService, from the last callback */
+    static volatile Object cpService;
+
+    /**
+     * Picture ("picture"): asks the phone for a new key frame when the CarPlay picture
+     * stalls (Keyframes says when). forceKeyFrame() runs on the part's own thread, never
+     * on the callback's.
+     */
+    private static void picture(boolean periodic, long period) {
+        final ClassLoader cl = app.classLoader;
+        // every point it hooks, before it starts anything: no half-hooked picture thread
+        for (String id : new String[] { "dipo.carplay.force_key_frame", "dipo.carplay.decode_failure", "dipo.carplay.screen_timeout",
+                "dipo.carplay.session_started", "dipo.carplay.session_finalized" }) {
+            if (!Points.has(id)) {
+                log("CarPlay picture: off on this car (" + id + " not mapped)");
+                return;
+            }
+        }
+        Points.method(cl, "dipo.carplay.force_key_frame");   // there before anything is hooked (throws if not)
+        HandlerThread t = new HandlerThread("hmgapi-cp-picture");
+        t.start();
+        pictureHandler = new Handler(t.getLooper());
+        keyframes = new Keyframes(periodic, period);
+        try {
+            mod.hook(cl, "dipo.carplay.session_started", new MethodHook() {
+                @Override
+                protected void afterHookedMethod(final Param p) {
+                    final Object cp = p.thisObject;
+                    final int transport = (Integer) p.args[0];
+                    pictureHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            cpService = cp;
+                            keyframes.sessionStarted(transport);
+                            keyframes.summary();
+                            results.clear();
+                            firstPeriodic = true;
+                            pictureHandler.removeCallbacks(TICK);
+                            pictureHandler.removeCallbacks(SUMMARY);
+                            log("CarPlay picture: session started, " + (transport == 1 ? "wireless" : "wired (transport " + transport + ")")
+                                    + (keyframes.ticking() ? ", a key frame every " + keyframes.period / 1000 + " s" : ", key frames on a stall only"));
+                            if (keyframes.ticking()) pictureHandler.postDelayed(TICK, keyframes.period);
+                            pictureHandler.postDelayed(SUMMARY, SUMMARY_MS);
+                        }
+                    });
+                }
+            });
+            mod.hook(cl, "dipo.carplay.session_finalized", new MethodHook() {
+                @Override
+                protected void afterHookedMethod(Param p) {
+                    pictureHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            keyframes.sessionEnded();
+                            pictureHandler.removeCallbacks(TICK);
+                            pictureHandler.removeCallbacks(SUMMARY);
+                            logSummary("session ended");
+                        }
+                    });
+                }
+            });
+            mod.hook(cl, "dipo.carplay.decode_failure", new MethodHook() {
+                @Override
+                protected void afterHookedMethod(final Param p) {
+                    final Object cp = p.thisObject;
+                    final int type = (Integer) p.args[0];
+                    pictureHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            cpService = cp;
+                            int before = keyframes.failures;
+                            if (keyframes.decodeFailure(type, now())) forceKeyFrame("decoder failure type " + type + " (" + (before + 1) + " since the last key frame)");
+                        }
+                    });
+                }
+            });
+            mod.hook(cl, "dipo.carplay.screen_timeout", new MethodHook() {
+                @Override
+                protected void afterHookedMethod(final Param p) {
+                    final Object cp = p.thisObject;
+                    pictureHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            cpService = cp;
+                            if (keyframes.screenTimeout(now())) forceKeyFrame("screen timeout");
+                        }
+                    });
+                }
+            });
+        } catch (RuntimeException e) {
+            t.quit();   // the hooks already set post to a stopped thread, which drops their work
+            throw e;
+        } catch (Error e) {
+            t.quit();
+            throw e;
+        }
+        log("CarPlay picture: key frame on a stall" + (periodic ? ", and every " + keyframes.period / 1000 + " s on wireless" : ""));
+    }
+
+    static final Runnable TICK = new Runnable() {
+        @Override
+        public void run() {
+            if (!keyframes.ticking()) return;
+            long now = now();
+            if (keyframes.tick(now)) forceKeyFrame(null);
+            pictureHandler.postDelayed(this, keyframes.nextTick(now));
+        }
+    };
+
+    /** once a minute during a session: what the picture part saw and did */
+    static final Runnable SUMMARY = new Runnable() {
+        @Override
+        public void run() {
+            logSummary("last minute");
+            pictureHandler.postDelayed(this, SUMMARY_MS);
+        }
+    };
+
+    /** the summary line, even when nothing happened (a quiet minute is an answer too) */
+    static void logSummary(String what) {
+        log("CarPlay picture: " + what + ": " + keyframes.summary() + "; answers " + (results.isEmpty() ? "none" : results.toString()));
+        results.clear();
+    }
+
+    static boolean firstPeriodic;
+
+    static long now() {
+        return SystemClock.uptimeMillis();
+    }
+
+    /** on the picture thread; why null for the periodic one (logged the first time, then counted in the summaries) */
+    static void forceKeyFrame(String why) {
+        Object cp = cpService;
+        if (cp == null) return;
+        int failures = keyframes.failures;
+        keyframes.failures = 0;
+        try {
+            Object r = Points.call(app.classLoader, "dipo.carplay.force_key_frame", cp);
+            String k = String.valueOf(r);
+            Integer n = results.get(k);
+            results.put(k, n == null ? 1 : n + 1);
+            if (why != null) log("CarPlay picture: key frame asked for after " + why + ": " + r);
+            else if (failures > 0) log("CarPlay picture: periodic key frame, " + failures + " decoder failure(s) since the last: " + r);
+            else if (firstPeriodic) log("CarPlay picture: first periodic key frame of the session: " + r);
+            if (why == null) firstPeriodic = false;
+        } catch (Throwable t) {
+            error("CarPlay picture: forceKeyFrame failed", t);
+        }
+    }
+
+    private static void bridge() {"""
+
+
+def patch_wireless(repo: Path) -> None:
+    print("== Preparing wireless-carplay-aa 2.2.3 (on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c)")
+
+    # Verify Watchdog was never introduced anywhere
     assert not (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Watchdog.java").exists()
     assert not (repo / "wireless-carplay-aa/tools/watchdog").exists()
+    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/NaviBridge.java").exists(), "Expected NaviBridge.java from 262554c"
+    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/AaNavState.java").exists(), "Expected AaNavState.java from 262554c"
 
     dipo_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java"
+    bridge_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Bridge.java"
     dsrc = dipo_java.read_text(encoding="utf-8")
-    assert "dipo.carplay.disable_bluetooth" in dsrc or "dipo.carplay.disable_bluetooth" in (
-        repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Bridge.java"
-    ).read_text(encoding="utf-8"), "Expected upstream PR #2 hook"
+    assert "dipo.carplay.disable_bluetooth" in dsrc or "dipo.carplay.disable_bluetooth" in bridge_java.read_text(encoding="utf-8")
     assert "bridge_watchdog" not in dsrc.lower()
 
-    # Verify upstream v2.2.0-rc.8 + #94 already includes PR #54, #55, #58, #86
-    assert (repo / "wireless-carplay-aa/tools/leafiaaac/test.sh").exists(), "Expected upstream PR #55 leafiaaac test"
+    assert (repo / "wireless-carplay-aa/tools/leafiaaac/test.sh").exists(), "Expected leafiaaac test"
     test_sh_text = (repo / "wireless-carplay-aa/test.sh").read_text(encoding="utf-8")
     assert '"hmgapi@>=1.0,!wireless.projection,!projection.tbt,!enhanced.projection"' in test_sh_text
 
-    # Update mod.json (preserve upstream v2.2.0-rc.8 system matrix, hotspot, CarPlay identity, popup hook, and conflicts)
+    # Update mod.json (preserve 262554c system matrix, wifi.projection, trap-frame hooks, CarPlay identity, and conflicts)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "2.2.2"
-    mod["hmgapi"] = ">=1.1.0"
-    assert mod.get("wifi") == {"hotspot": True}, f"Expected wifi.hotspot in rc.8 mod.json, got {mod.get('wifi')}"
-    assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in rc.8 mod.json"
-    assert "enhanced.projection" in mod.get("nemesis_conflicts", []), "Expected enhanced.projection in rc.8 mod.json"
+    mod["version"] = "2.2.3"
+    mod["hmgapi"] = ">=1.1.1"
+    assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in 262554c mod.json, got {mod.get('wifi')}"
+    assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in mod.json"
+    assert "enhanced.projection" in mod.get("nemesis_conflicts", []), "Expected enhanced.projection in mod.json"
     add_coauthor(mod)
 
     if not any(p.get("id") == "wifi_direct" for p in mod["parts"]):
         mod["parts"].append({"id": "wifi_direct", "when": "settings.wifi_direct"})
 
     pts = mod["hooks"]["points"]
+    assert pts.get("framework.navigation_cluster.update_tbt_trap_info") == "change"
+    assert pts.get("framework.navigation_cluster.update_tbt_trap_info_new") == "change"
     pts["dipo.carplay.decode_failure"] = "observe"
     pts["dipo.carplay.screen_timeout"] = "observe"
     pts["gpm.sensor_source.init"] = "observe"
     pts["gpm.receiver_service.disconnected"] = "observe"
     write_json(mod_path, mod)
 
-    # Update settings.json (PR #16 picture + tbt_no_icon, PR #28 wifi_direct, PR #56 projection_focus=True, NO bridge_watchdog)
+    # Update settings.json (keep 262554c tbt_standard=True, add PR #56 projection_focus=True, PR #16 picture, PR #28 wifi_direct)
     settings_path = repo / "wireless-carplay-aa/settings.json"
     sdata = json.loads(settings_path.read_text(encoding="utf-8"))
     new_settings = []
@@ -108,28 +274,7 @@ def patch_wireless(repo: Path) -> None:
         if item["key"] == "bridge_watchdog":
             continue
         new_settings.append(item)
-        if item["key"] == "tbt":
-            new_settings.append(
-                {
-                    "key": "tbt_no_icon",
-                    "type": "choice",
-                    "default": "straight",
-                    "title": "CarPlay turns with no arrow",
-                    "apply": "restart",
-                    "description": (
-                        "A maneuver the cluster has no icon for, after the nearest one is tried "
-                        "(the start of a route, say). Clearing the turn or an empty turn shows "
-                        "the cluster's spinner and hides the distance."
-                    ),
-                    "options": [
-                        {"value": "straight", "title": "Straight arrow with the distance"},
-                        {"value": "clear", "title": "Clear the turn from the cluster"},
-                        {"value": "skip", "title": "Leave the last turn up (2.1.0)"},
-                        {"value": "no_info", "title": "Send an empty turn (can show a spinner)"},
-                    ],
-                }
-            )
-        elif item["key"] == "audio":
+        if item["key"] == "audio":
             new_settings.extend(
                 [
                     {
@@ -201,10 +346,10 @@ def patch_wireless(repo: Path) -> None:
     assert all(x["key"] != "bridge_watchdog" for x in sdata["settings"])
     write_json(settings_path, sdata)
 
-    # Update patches.json (preserve upstream rc.5 cars mapping, append opt-in PR #28 wifi_direct props)
+    # Update patches.json (preserve cars mapping, append opt-in PR #28 wifi_direct props)
     patches_path = repo / "wireless-carplay-aa/patches.json"
     pdata = json.loads(patches_path.read_text(encoding="utf-8"))
-    assert pdata["cars"].get("NEEV23SE.USA.") == "neev", "Expected NEEV23SE.USA. in rc.5 patches.json"
+    assert pdata["cars"].get("NEEV23SE.USA.") == "neev", "Expected NEEV23SE.USA. in patches.json"
     pdata["changes"].extend(
         [
             {
@@ -225,11 +370,13 @@ def patch_wireless(repo: Path) -> None:
     )
     write_json(patches_path, pdata)
 
-    # Install reviewed PR #56 FocusPolicy + FocusGuard (with projection_focus default=True for Gen5W Suite)
+    # Install reviewed PR #56 FocusPolicy + FocusGuard and PR #16 Keyframes picture recovery
     focus_src_dir = PATCH_DIR / "wireless-focus"
+    picture_src_dir = PATCH_DIR / "wireless-picture"
     mod_wireless_dir = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless"
     shutil.copy2(focus_src_dir / "FocusPolicy.java", mod_wireless_dir / "FocusPolicy.java")
     shutil.copy2(focus_src_dir / "FocusGuard.java", mod_wireless_dir / "FocusGuard.java")
+    shutil.copy2(picture_src_dir / "Keyframes.java", mod_wireless_dir / "dipo/Keyframes.java")
 
     # Wire Wireless.java (btaudio.ui + GPM hooks + DIPO entry condition)
     wireless_java = mod_wireless_dir / "Wireless.java"
@@ -242,8 +389,9 @@ def patch_wireless(repo: Path) -> None:
         if (GPM.equals(app.packageName) && mod.settingBoolean("usb_drives", true)) usbDrives(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
-        if (SYSTEM_POPUP.equals(app.packageName) && mod.settingBoolean("menu", true)) popupSettings(mod, app);
-        if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true))) dipo(mod, app);
+        if ((SYSTEM_POPUP.equals(app.packageName) || LAUNCHER.equals(app.packageName) || SETTINGS_APP.equals(app.packageName))
+                && mod.settingBoolean("menu", true)) popupSettings(mod, app);
+        if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true))) dipo(mod, app);
     }""",
         """    @Override
     public void appLoaded(final ModContext mod, LoadedApp app) {
@@ -254,7 +402,8 @@ def patch_wireless(repo: Path) -> None:
         if (GPM.equals(app.packageName) && mod.settingBoolean("projection_focus", true)) FocusGuard.gpm(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
-        if (SYSTEM_POPUP.equals(app.packageName) && mod.settingBoolean("menu", true)) popupSettings(mod, app);
+        if ((SYSTEM_POPUP.equals(app.packageName) || LAUNCHER.equals(app.packageName) || SETTINGS_APP.equals(app.packageName))
+                && mod.settingBoolean("menu", true)) popupSettings(mod, app);
         if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true) || mod.settingBoolean("projection_focus", true))) dipo(mod, app);
     }""",
         "Wireless.appLoaded",
@@ -302,7 +451,7 @@ def patch_wireless(repo: Path) -> None:
         "Wireless.usbDrives",
     )
 
-    # Wire Dipo.java via FocusGuard.dipo(m, a) (AppPartLoader delegates hmgapi.mods.wireless.* to main loader)
+    # Wire Dipo.java via FocusGuard.dipo(m, a) and Keyframes picture(...)
     replace_exact(
         dipo_java,
         "import hmgapi.hook.Points;\n",
@@ -311,14 +460,27 @@ def patch_wireless(repo: Path) -> None:
     )
     replace_exact(
         dipo_java,
-        "        if (tbt) turnByTurn();\n",
-        "        if (FocusGuard.active(m)) FocusGuard.dipo(m, a);\n        if (tbt) turnByTurn();\n",
-        "Dipo.start FocusGuard.dipo",
+        "        if (!tbt && !bridge) return;\n        rgWatch();\n",
+        "        if (FocusGuard.active(m)) FocusGuard.dipo(m, a);\n"
+        "        if (m.settingBoolean(\"picture\", true)) {\n"
+        "            try {\n"
+        "                picture(m.settingBoolean(\"picture_periodic\", false), periodMs(m.settingString(\"picture_period\", \"5\")));\n"
+        "            } catch (Throwable t) {\n"
+        "                error(\"CarPlay picture: off\", t);\n"
+        "            }\n"
+        "        }\n"
+        "        if (!tbt && !bridge) return;\n        rgWatch();\n",
+        "Dipo.start FocusGuard.dipo + picture",
+    )
+    replace_exact(
+        dipo_java,
+        "    private static void bridge() {",
+        DIPO_PICTURE_BLOCK,
+        "Dipo.picture methods",
     )
 
     # Wire Bridge.java (notify FocusGuard during wireless CarPlay SPP handshake, skip post-disconnect onUsbGone,
     # and suppress Bridge SPP/SoftAP while Home Wi-Fi or parked keep-awake owns wlan0)
-    bridge_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Bridge.java"
     replace_exact(
         bridge_java,
         "import hmgapi.hook.Points;\n",
@@ -340,20 +502,6 @@ def patch_wireless(repo: Path) -> None:
     )
     replace_exact(
         bridge_java,
-        """    static void ensureHotspot(Context c) {
-        try {
-            Object wifi = c.getSystemService(Context.WIFI_SERVICE);""",
-        """    static void ensureHotspot(Context c) {
-        if (!enabled()) {
-            log("skipping hotspot: Home Wi-Fi or parked keep-awake owns wlan0");
-            return;
-        }
-        try {
-            Object wifi = c.getSystemService(Context.WIFI_SERVICE);""",
-        "Bridge.ensureHotspot HomeWiFi/parked guard",
-    )
-    replace_exact(
-        bridge_java,
         """    static void scheduleSppConnect(final String addr) {
         if (addr == null || !enabled() || sUsb || sSession || sCpWireless) return;
         handler().postDelayed(new Runnable() {""",
@@ -366,20 +514,26 @@ def patch_wireless(repo: Path) -> None:
     replace_exact(
         bridge_java,
         """    static void onSppUp(final String addr) {
-        if (addr == null || sSession) return;
-        sAddr = addr;
-        if (sCpClient || sCpWireless || !enabled() || sUsb) return;
-        sSession = true;
+        if (addr == null) return;
+        synchronized (Bridge.class) {
+            if (sSession) return;
+            sAddr = addr;
+            if (sCpClient || sCpWireless || !enabled() || sUsb) return;
+            sSession = true;
+        }
         handler().post(new Runnable() {""",
         """    static void onSppUp(String addr) {
         onSppUp(addr, true);
     }
 
     static void onSppUp(final String addr, boolean notifyFocus) {
-        if (addr == null || sSession) return;
-        sAddr = addr;
-        if (sCpClient || sCpWireless || !enabled() || sUsb) return;
-        sSession = true;
+        if (addr == null) return;
+        synchronized (Bridge.class) {
+            if (sSession) return;
+            sAddr = addr;
+            if (sCpClient || sCpWireless || !enabled() || sUsb) return;
+            sSession = true;
+        }
         if (notifyFocus) FocusGuard.onCpConnecting(Dipo.mod, context);
         handler().post(new Runnable() {""",
         "Bridge.onSppUp",
@@ -406,7 +560,7 @@ def patch_wireless(repo: Path) -> None:
         "Bridge.onSppDown",
     )
 
-    # Install host unit test for FocusPolicy (tools/focus/test.sh)
+    # Install host unit test for FocusPolicy (tools/focus/test.sh) and Keyframes (tools/picture/test.sh)
     focus_test_dir = repo / "wireless-carplay-aa/tools/focus/test/hmgapi/mods/wireless"
     focus_test_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(focus_src_dir / "FocusPolicyTest.java", focus_test_dir / "FocusPolicyTest.java")
@@ -428,16 +582,34 @@ java -cp "$CP" hmgapi.mods.wireless.FocusPolicyTest
     )
     focus_test_sh.chmod(focus_test_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    # Wire FocusPolicy + FocusGuard + PR #16 Compass replay stubs in tools/aa-support
+    picture_test_dir = repo / "wireless-carplay-aa/tools/picture/test/hmgapi/mods/wireless/dipo"
+    picture_test_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(picture_src_dir / "KeyframesTest.java", picture_test_dir / "KeyframesTest.java")
+    picture_test_sh = repo / "wireless-carplay-aa/tools/picture/test.sh"
+    picture_test_sh.write_text(
+        """#!/bin/sh
+# Host test of the Wireless mod's CarPlay picture recovery policy (dipo/Keyframes):
+# when a key frame is asked for, and how often at most.
+set -e
+cd "$(dirname "$0")"
+CP=$(mktemp -d); trap 'rm -rf "$CP"' EXIT
+javac --release 8 -Xlint:-options -nowarn -d "$CP" $(find test -name '*.java') ../../src/hmgapi/mods/wireless/dipo/Keyframes.java
+java -cp "$CP" hmgapi.mods.wireless.dipo.KeyframesTest
+""",
+        encoding="utf-8",
+    )
+    picture_test_sh.chmod(picture_test_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    # Wire FocusPolicy + FocusGuard stubs & assertions in tools/aa-support
     aa_support_dir = repo / "wireless-carplay-aa/tools/aa-support"
     aa_support_root = aa_support_dir / "stubs"
     if aa_support_root.is_dir():
         replace_exact(
             aa_support_dir / "test.sh",
-            "    ../../src/hmgapi/mods/wireless/AaTbtSupport.java \\\n    ../../src/hmgapi/mods/wireless/Wireless.java",
+            "    ../../src/hmgapi/mods/wireless/AaTbtSupport.java \\\n    ../../src/hmgapi/mods/wireless/NaviBridge.java \\",
             "    ../../src/hmgapi/mods/wireless/AaTbtSupport.java \\\n"
             "    ../../src/hmgapi/mods/wireless/FocusPolicy.java \\\n"
-            "    ../../src/hmgapi/mods/wireless/Wireless.java",
+            "    ../../src/hmgapi/mods/wireless/NaviBridge.java \\",
             "aa-support/test.sh FocusPolicy",
         )
         (aa_support_root / "hmgapi/mods/wireless/FocusGuard.java").write_text(
@@ -484,35 +656,11 @@ public final class FocusGuard {
             encoding="utf-8",
         )
         replace_exact(
-            aa_support_root / "hmgapi/hook/MethodHook.java",
-            "public Object thisObject;",
-            "public java.lang.reflect.Member method;\n        public Object thisObject;",
-            "MethodHook.method stub",
-        )
-        (aa_support_root / "android/os/Looper.java").write_text(
-            """package android.os;
-
-public final class Looper {
-    public static Looper getMainLooper() { return new Looper(); }
-}
-""",
-            encoding="utf-8",
-        )
-        replace_exact(
-            aa_support_root / "android/os/Handler.java",
-            "public boolean post(Runnable runnable) { pending.add(runnable); return true; }",
-            "public boolean post(Runnable runnable) { pending.add(runnable); return true; }\n"
-            "    public boolean postDelayed(Runnable runnable, long delayMillis) { return post(runnable); }",
-            "Handler.postDelayed stub",
-        )
-        replace_exact(
             aa_support_dir / "test/hmgapi/mods/wireless/AaSupportTest.java",
-            """            wireless.appLoaded(stock, new LoadedApp(Wireless.GPM));
-            check(stock.natives.isEmpty() && stock.hooks.size() == 1, "native GPM TBT is preserved at step 999");
-            Car.step = 105;""",
-            """            wireless.appLoaded(stock, new LoadedApp(Wireless.GPM));
-            check(stock.natives.isEmpty() && stock.hooks.size() == 1, "native GPM TBT is preserved at step 999");
-            Car.step = 105;
+            """            Car.step = 105;
+            testNaviBridge(unknown);""",
+            """            Car.step = 105;
+            testNaviBridge(unknown);
 
             FocusGuard.reset();
             ModContext defaultFocus = enabled();

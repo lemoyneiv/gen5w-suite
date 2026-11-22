@@ -55,8 +55,8 @@ if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
 fi
 
 CORE_APP_KEY="$KEY_DIR/hmgapi-core-app.p12"
-if [ ! -f "$HMGAPI/out/sdk/VERSION" ] || [ "$(cat "$HMGAPI/out/sdk/VERSION" 2>/dev/null)" != "1.1.1-rc.15" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.15-nemesis-package.zip" ]; then
-    echo "== Building HMG-API Core 1.1.1-rc.15 & Mod SDK =="
+if [ ! -f "$HMGAPI/out/sdk/VERSION" ] || [ "$(cat "$HMGAPI/out/sdk/VERSION" 2>/dev/null)" != "1.1.1-rc.16" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.16-nemesis-package.zip" ]; then
+    echo "== Building HMG-API Core 1.1.1-rc.16 & Mod SDK =="
     (cd "$HMGAPI" && HMGAPI_KEY="$CORE_APP_KEY" ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
 fi
 HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
@@ -80,6 +80,7 @@ fetch_upstream() {
         echo "Cloning $url -> $CACHE_DIR/$name"
         git clone -q "$url" "$CACHE_DIR/$name"
     fi
+    git -C "$CACHE_DIR/$name" remote set-url origin "$url" 2>/dev/null || git -C "$CACHE_DIR/$name" remote add origin "$url"
     if ! git -C "$CACHE_DIR/$name" cat-file -e "$sha^{commit}" 2>/dev/null; then
         if [ -d "$SUITE_ROOT/../$name/.git" ] && git -C "$SUITE_ROOT/../$name" cat-file -e "$sha^{commit}" 2>/dev/null; then
             git -C "$CACHE_DIR/$name" fetch -q "$SUITE_ROOT/../$name" "$sha"
@@ -122,7 +123,7 @@ verify_official_mod() {
     rm -rf "$tmp_dir"
 }
 
-WIRELESS_SHA=27e629d24be92146def367826003be662e54fee0
+WIRELESS_SHA=262554c87fe4a19621b6c4e004f98a59046fbeb4
 COMFORT_SHA=fae56f8b70976faafffde90316c336f35c8bab65
 LIGHT_VIBES_SHA=dc0704927920e43882f84bc35ef87dbb6eeed9c6
 ADB_TAG=v1.0.1-rc.1
@@ -132,7 +133,7 @@ EGMP_TAG=v0.8.2
 EGMP_VER=0.8.2
 EGMP_UUID=839375d3-8aea-884a-a9e9-c79964fe5d88
 
-fetch_upstream hmgapi-wireless-cp-aa https://github.com/Open-HMG/hmgapi-wireless-cp-aa.git "$WIRELESS_SHA"
+fetch_upstream hmgapi-wireless-cp-aa https://github.com/lemoyneiv/hmgapi-wireless-cp-aa.git "$WIRELESS_SHA"
 fetch_upstream hmg-aa-dpi            https://github.com/eliotwass/hmg-aa-dpi.git           4222625d25e2776f926cf372ff3220fc3ec6d20c
 fetch_upstream hmgapi-comfort        https://github.com/lemoyneiv/hmgapi-comfort.git       "$COMFORT_SHA"
 fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.git          "$LIGHT_VIBES_SHA"
@@ -184,7 +185,7 @@ python3 "$SUITE_ROOT/patches/prepare-mods.py" --work-dir "$WORK_SRC"
 
 echo ""
 echo "=================================================================="
-echo " STEP 2: Building, Testing & Signing wireless-carplay-aa 2.2.2"
+echo " STEP 2: Building, Testing & Signing wireless-carplay-aa 2.2.3"
 echo "=================================================================="
 (
     cd "$WORK_SRC/hmgapi-wireless-cp-aa"
@@ -199,8 +200,8 @@ echo "=================================================================="
     echo "$out"
     z=$(echo "$out" | tail -1)
     sh "$HMGAPI_SDK/bin/mknemesismod.sh" "$z"
-    cp "$z" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.2.hmgapi.zip"
-    cp out/dist/wireless-carplay-aa-2.2.2-nemesis-package.zip "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.2-nemesis-package.zip"
+    cp "$z" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3.hmgapi.zip"
+    cp out/dist/wireless-carplay-aa-2.2.3-nemesis-package.zip "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3-nemesis-package.zip"
     mkdir -p out/staged/wireless-carplay-aa
     unzip -q "$z" -d out/staged/wireless-carplay-aa
 )
@@ -325,7 +326,7 @@ mkdir -p "$STAGE_EXEC/packages" "$STAGE_EXEC/HMGAPI/updates" \
 # Populate HMGAPI/FORCE and ordered HMGAPI/updates/*.hmgapi.zip
 for d in "$STAGE_EXEC" "$STAGE_LIST" "$STAGE_UPD"; do
     : > "$d/HMGAPI/FORCE"
-    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.2.hmgapi.zip" "$d/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip"
+    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3.hmgapi.zip" "$d/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/adb-v${ADB_VER}.hmgapi.zip"            "$d/HMGAPI/updates/02-adb.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0.hmgapi.zip"              "$d/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v${EGMP_VER}.hmgapi.zip"    "$d/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
@@ -336,7 +337,7 @@ done
 # Populate NEMESIS packages/ folder for both NEMESIS sticks
 for d in "$STAGE_EXEC" "$STAGE_LIST"; do
     cp "$CORE_NEM_PKG"                                                         "$d/packages/hmgapi.zip"
-    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.2-nemesis-package.zip" "$d/packages/hmgapi.wireless-carplay-aa.zip"
+    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3-nemesis-package.zip" "$d/packages/hmgapi.wireless-carplay-aa.zip"
     cp "$SUITE_ROOT/dist/mods/adb-v${ADB_VER}-nemesis-package.zip"            "$d/packages/hmgapi.adb.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0-nemesis-package.zip"              "$d/packages/hmgapi.aa-dpi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v${EGMP_VER}-nemesis-package.zip"    "$d/packages/hmgapi.egmp-aa-ev.zip"
@@ -364,8 +365,8 @@ published=${TODAY}
 
 [package.1]
 path=packages/hmgapi.wireless-carplay-aa.zip
-name=Wireless CarPlay + Android Auto (2.2.2)
-short-desc=Wireless CP/AA (rc.8+#94), popup fix, Now Playing, AR HUD/cluster TBT, BT focus & freeze fixes
+name=Wireless CarPlay + Android Auto (2.2.3)
+short-desc=Wireless CP/AA (TBT & compass overhaul), AR HUD/cluster intersections, BT focus & freeze fixes
 published=${TODAY}
 
 [package.2]
