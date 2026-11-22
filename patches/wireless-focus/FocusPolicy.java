@@ -257,4 +257,125 @@ public final class FocusPolicy {
         sawProjectionForeground = false;
         preemptedBtFocus = false;
     }
+
+    // ---- Parked Keep-Awake & Home Wi-Fi wlan0 ownership guard for Bridge ----
+
+    public static final long LEASE_FRESHNESS_MS = 30_000L;
+
+    public static boolean isHomeWifiOrParkedLeaseActiveOnDevice(long nowElapsedMs, String wpaSupplicantProp) {
+        String curBoot = readSmallUtf8(new java.io.File("/proc/sys/kernel/random/boot_id")).trim();
+        String wifiJson = readSmallUtf8(new java.io.File("/data/hmgapi/public/wifi.json"));
+        String openlinkLease = readSmallUtf8(new java.io.File("/data/hmgapi/public/openlink-keepawake.json"));
+        String hmgLease = readSmallUtf8(new java.io.File("/data/hmgapi/public/keepawake.json"));
+        return shouldSuppressBridgeForHomeWifiOrPark(
+                curBoot, nowElapsedMs, wpaSupplicantProp, wifiJson, openlinkLease, hmgLease);
+    }
+
+    public static boolean shouldSuppressBridgeForHomeWifiOrPark(
+            String curBootId,
+            long nowElapsedMs,
+            String wpaSupplicantProp,
+            String wifiJson,
+            String openlinkLeaseJson,
+            String hmgLeaseJson) {
+        if (isActiveFreshLeaseJson(openlinkLeaseJson, curBootId, nowElapsedMs)) {
+            return true;
+        }
+        if (isActiveFreshLeaseJson(hmgLeaseJson, curBootId, nowElapsedMs)) {
+            return true;
+        }
+        String st = extractJsonString(wifiJson, "state");
+        if ("up".equalsIgnoreCase(st)
+                || "searching".equalsIgnoreCase(st)
+                || "nolease".equalsIgnoreCase(st)) {
+            String wpa = wpaSupplicantProp == null ? "" : wpaSupplicantProp.trim();
+            if ("running".equalsIgnoreCase(wpa)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isActiveFreshLeaseJson(String json, String curBootId, long nowElapsedMs) {
+        if (json == null || json.isEmpty()) return false;
+        if (!extractJsonBoolean(json, "active")) return false;
+        if (extractJsonBoolean(json, "cutBy12vFloor")) return false;
+        String boot = extractJsonString(json, "bootId");
+        String cur = curBootId == null ? "" : curBootId.trim();
+        if (!cur.isEmpty() && !boot.isEmpty() && !cur.equals(boot)) {
+            return false;
+        }
+        long upd = extractJsonLong(json, "updatedAtElapsedMs", -1L);
+        if (upd > 0L && nowElapsedMs > 0L && Math.abs(nowElapsedMs - upd) > LEASE_FRESHNESS_MS) {
+            return false;
+        }
+        if (!extractJsonBoolean(json, "unlimited")) {
+            long exp = extractJsonLong(json, "expiresAtElapsedMs", -1L);
+            if (exp > 0L && nowElapsedMs >= exp) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String extractJsonString(String json, String key) {
+        if (json == null || json.isEmpty()) return "";
+        int k = json.indexOf("\"" + key + "\"");
+        if (k < 0) return "";
+        int colon = json.indexOf(':', k + key.length() + 2);
+        if (colon < 0) return "";
+        int q1 = json.indexOf('"', colon + 1);
+        if (q1 < 0) return "";
+        int q2 = json.indexOf('"', q1 + 1);
+        if (q2 < 0) return "";
+        return json.substring(q1 + 1, q2).trim();
+    }
+
+    private static boolean extractJsonBoolean(String json, String key) {
+        if (json == null || json.isEmpty()) return false;
+        int k = json.indexOf("\"" + key + "\"");
+        if (k < 0) return false;
+        int colon = json.indexOf(':', k + key.length() + 2);
+        if (colon < 0) return false;
+        int i = colon + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        return json.regionMatches(true, i, "true", 0, 4);
+    }
+
+    private static long extractJsonLong(String json, String key, long fallback) {
+        if (json == null || json.isEmpty()) return fallback;
+        int k = json.indexOf("\"" + key + "\"");
+        if (k < 0) return fallback;
+        int colon = json.indexOf(':', k + key.length() + 2);
+        if (colon < 0) return fallback;
+        int i = colon + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        int start = i;
+        if (i < json.length() && json.charAt(i) == '-') i++;
+        while (i < json.length() && Character.isDigit(json.charAt(i))) i++;
+        if (i <= start || (i == start + 1 && json.charAt(start) == '-')) return fallback;
+        try {
+            return Long.parseLong(json.substring(start, i));
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private static String readSmallUtf8(java.io.File f) {
+        if (f == null || !f.isFile()) return "";
+        java.io.FileInputStream in = null;
+        try {
+            in = new java.io.FileInputStream(f);
+            byte[] buf = new byte[512];
+            int n = in.read(buf);
+            if (n <= 0) return "";
+            return new String(buf, 0, n, "UTF-8");
+        } catch (Throwable ignored) {
+            return "";
+        } finally {
+            if (in != null) {
+                try { in.close(); } catch (Throwable ignored) {}
+            }
+        }
+    }
 }

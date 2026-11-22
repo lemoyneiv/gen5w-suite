@@ -125,6 +125,43 @@ public final class FocusPolicyTest {
                         && p.decideReclaim(false, true, FocusPolicy.MODE_BT_AUDIO, FocusPolicy.MICOM_BT_AUDIO, false, FocusPolicy.PKG_BTAUDIO, 50_400L)
                                 == FocusPolicy.ACTION_RECLAIM_ANDROID_AUTO);
 
+        // 9. Bridge SoftAP suppression during parked keep-awake & Home Wi-Fi client sessions
+        String bootA = "11223344-5566-7788-99aa-bbccddeeff00";
+        String bootB = "ffeeddcc-bbaa-9988-7766-554433221100";
+        check("IG ON idle (wifi=waiting, no leases, wpa stopped) allows Bridge SoftAP",
+                !FocusPolicy.shouldSuppressBridgeForHomeWifiOrPark(
+                        bootA, 50_000L, "stopped", "{\"state\": \"waiting\"}", "", ""));
+        check("Active OpenLink keep-awake lease suppresses Bridge SoftAP",
+                FocusPolicy.shouldSuppressBridgeForHomeWifiOrPark(
+                        bootA,
+                        50_000L,
+                        "stopped",
+                        "{\"state\": \"waiting\"}",
+                        "{\"bootId\":\"" + bootA + "\",\"active\":true,\"unlimited\":false,\"expiresAtElapsedMs\":1850000,\"updatedAtElapsedMs\":48000}",
+                        ""));
+        check("Active HMG-API Home Wi-Fi keep-awake lease suppresses Bridge SoftAP",
+                FocusPolicy.shouldSuppressBridgeForHomeWifiOrPark(
+                        bootA,
+                        50_000L,
+                        "running",
+                        "{\"state\": \"up\"}",
+                        "",
+                        "{\"bootId\":\"" + bootA + "\",\"active\":true,\"unlimited\":true,\"updatedAtElapsedMs\":49000}"));
+        check("Stale lease from previous bootId does NOT block Bridge SoftAP",
+                !FocusPolicy.shouldSuppressBridgeForHomeWifiOrPark(
+                        bootA,
+                        50_000L,
+                        "stopped",
+                        "{\"state\": \"waiting\"}",
+                        "{\"bootId\":\"" + bootB + "\",\"active\":true,\"unlimited\":true,\"updatedAtElapsedMs\":49000}",
+                        ""));
+        check("Stale wifi.json=up with stopped wpa_supplicant does NOT block IG ON Bridge SoftAP",
+                !FocusPolicy.shouldSuppressBridgeForHomeWifiOrPark(
+                        bootA, 120_000L, "stopped", "{\"state\": \"up\"}", "", ""));
+        check("Manual Park Home Wi-Fi (wifi.json=searching + wpa_supplicant=running) suppresses Bridge SoftAP",
+                FocusPolicy.shouldSuppressBridgeForHomeWifiOrPark(
+                        bootA, 120_000L, "running", "{\"state\": \"searching\"}", "", ""));
+
         System.out.println("ok    FocusPolicy: " + passed + " checks (no car access)");
     }
 }

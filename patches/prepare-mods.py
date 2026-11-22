@@ -316,13 +316,41 @@ def patch_wireless(repo: Path) -> None:
         "Dipo.start FocusGuard.dipo",
     )
 
-    # Wire Bridge.java (notify FocusGuard during wireless CarPlay SPP handshake, skip post-disconnect onUsbGone)
+    # Wire Bridge.java (notify FocusGuard during wireless CarPlay SPP handshake, skip post-disconnect onUsbGone,
+    # and suppress Bridge SPP/SoftAP while Home Wi-Fi or parked keep-awake owns wlan0)
     bridge_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Bridge.java"
     replace_exact(
         bridge_java,
         "import hmgapi.hook.Points;\n",
-        "import hmgapi.hook.Points;\nimport hmgapi.mods.wireless.FocusGuard;\n",
-        "Bridge FocusGuard import",
+        "import hmgapi.hook.Points;\nimport hmgapi.mods.wireless.FocusGuard;\nimport hmgapi.mods.wireless.FocusPolicy;\n",
+        "Bridge FocusGuard+FocusPolicy import",
+    )
+    replace_exact(
+        bridge_java,
+        """    static boolean enabled() {
+        return !"0".equals(prop("persist.ev6.cpwl.enable", "1"));
+    }""",
+        """    static boolean enabled() {
+        if ("0".equals(prop("persist.ev6.cpwl.enable", "1"))) return false;
+        return !FocusPolicy.isHomeWifiOrParkedLeaseActiveOnDevice(
+                android.os.SystemClock.elapsedRealtime(),
+                prop("init.svc.wpa_supplicant", ""));
+    }""",
+        "Bridge.enabled HomeWiFi/parked guard",
+    )
+    replace_exact(
+        bridge_java,
+        """    static void ensureHotspot(Context c) {
+        try {
+            Object wifi = c.getSystemService(Context.WIFI_SERVICE);""",
+        """    static void ensureHotspot(Context c) {
+        if (!enabled()) {
+            log("skipping hotspot: Home Wi-Fi or parked keep-awake owns wlan0");
+            return;
+        }
+        try {
+            Object wifi = c.getSystemService(Context.WIFI_SERVICE);""",
+        "Bridge.ensureHotspot HomeWiFi/parked guard",
     )
     replace_exact(
         bridge_java,
