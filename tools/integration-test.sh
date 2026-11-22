@@ -139,7 +139,7 @@ do
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
     check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
-    check "$P: wireless-carplay-aa version 2.2.4" "2.2.4" \
+    check "$P: wireless-carplay-aa version 2.2.5" "2.2.5" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"

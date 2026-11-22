@@ -5,8 +5,8 @@ working copies of the three patched HMG-API mods (while `adb` and `egmp-aa-ev`
 consume unmodified official upstream-signed release archives and `hmgapi-comfort`
 builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
 
-  1. wireless-carplay-aa (2.2.4 on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c):
-     - Built on `feat/tbt-overhaul-and-cleanup` (`262554c`, based on Open-HMG
+  1. wireless-carplay-aa (2.2.5 on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a):
+     - Built on `feat/tbt-overhaul-and-cleanup` (`084486a`, based on Open-HMG
        `v2.2.0-rc.9`): dynamic native cluster & AR HUD intersection scenes
        (`tbt_standard` default `true`), `NaviBridge` immediate DisplayType 8 idle
        compass & heading replay + non-destructive speed-limit trap-frame countdown
@@ -226,13 +226,13 @@ DIPO_PICTURE_BLOCK = """    static Handler pictureHandler;
 
 
 def patch_wireless(repo: Path) -> None:
-    print("== Preparing wireless-carplay-aa 2.2.4 (on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c)")
+    print("== Preparing wireless-carplay-aa 2.2.5 (on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a)")
 
     # Verify Watchdog was never introduced anywhere
     assert not (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Watchdog.java").exists()
     assert not (repo / "wireless-carplay-aa/tools/watchdog").exists()
-    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/NaviBridge.java").exists(), "Expected NaviBridge.java from 262554c"
-    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/AaNavState.java").exists(), "Expected AaNavState.java from 262554c"
+    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/NaviBridge.java").exists(), "Expected NaviBridge.java from 084486a"
+    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/AaNavState.java").exists(), "Expected AaNavState.java from 084486a"
 
     dipo_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java"
     bridge_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Bridge.java"
@@ -244,12 +244,12 @@ def patch_wireless(repo: Path) -> None:
     test_sh_text = (repo / "wireless-carplay-aa/test.sh").read_text(encoding="utf-8")
     assert '"hmgapi@>=1.0,!wireless.projection,!projection.tbt,!enhanced.projection"' in test_sh_text
 
-    # Update mod.json (preserve 262554c system matrix, wifi.projection, trap-frame hooks, CarPlay identity, and conflicts)
+    # Update mod.json (preserve 084486a system matrix, wifi.projection, trap-frame hooks, CarPlay identity, and conflicts)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "2.2.4"
+    mod["version"] = "2.2.5"
     mod["hmgapi"] = ">=1.1.1"
-    assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in 262554c mod.json, got {mod.get('wifi')}"
+    assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in 084486a mod.json, got {mod.get('wifi')}"
     assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in mod.json"
     assert "enhanced.projection" in mod.get("nemesis_conflicts", []), "Expected enhanced.projection in mod.json"
     add_coauthor(mod)
@@ -266,7 +266,7 @@ def patch_wireless(repo: Path) -> None:
     pts["gpm.receiver_service.disconnected"] = "observe"
     write_json(mod_path, mod)
 
-    # Update settings.json (keep 262554c tbt_standard=True, add PR #56 projection_focus=True, PR #16 picture, PR #28 wifi_direct)
+    # Update settings.json (keep 084486a tbt_standard=True, add PR #56 projection_focus=True, PR #16 picture, PR #28 wifi_direct)
     settings_path = repo / "wireless-carplay-aa/settings.json"
     sdata = json.loads(settings_path.read_text(encoding="utf-8"))
     new_settings = []
