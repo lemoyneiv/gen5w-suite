@@ -55,8 +55,8 @@ if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
 fi
 
 CORE_APP_KEY="$KEY_DIR/hmgapi-core-app.p12"
-if [ ! -f "$HMGAPI/out/sdk/VERSION" ] || [ "$(cat "$HMGAPI/out/sdk/VERSION" 2>/dev/null)" != "1.1.1-rc.17" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.17-nemesis-package.zip" ]; then
-    echo "== Building HMG-API Core 1.1.1-rc.17 & Mod SDK =="
+if [ ! -f "$HMGAPI/out/sdk/VERSION" ] || [ "$(cat "$HMGAPI/out/sdk/VERSION" 2>/dev/null)" != "1.1.1-rc.18" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.18-nemesis-package.zip" ]; then
+    echo "== Building HMG-API Core 1.1.1-rc.18 & Mod SDK =="
     (cd "$HMGAPI" && HMGAPI_KEY="$CORE_APP_KEY" ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
 fi
 HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
@@ -185,7 +185,7 @@ python3 "$SUITE_ROOT/patches/prepare-mods.py" --work-dir "$WORK_SRC"
 
 echo ""
 echo "=================================================================="
-echo " STEP 2: Building, Testing & Signing wireless-carplay-aa 2.2.3"
+echo " STEP 2: Building, Testing & Signing wireless-carplay-aa 2.2.4"
 echo "=================================================================="
 (
     cd "$WORK_SRC/hmgapi-wireless-cp-aa"
@@ -200,8 +200,8 @@ echo "=================================================================="
     echo "$out"
     z=$(echo "$out" | tail -1)
     sh "$HMGAPI_SDK/bin/mknemesismod.sh" "$z"
-    cp "$z" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3.hmgapi.zip"
-    cp out/dist/wireless-carplay-aa-2.2.3-nemesis-package.zip "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3-nemesis-package.zip"
+    cp "$z" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.4.hmgapi.zip"
+    cp out/dist/wireless-carplay-aa-2.2.4-nemesis-package.zip "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.4-nemesis-package.zip"
     mkdir -p out/staged/wireless-carplay-aa
     unzip -q "$z" -d out/staged/wireless-carplay-aa
 )
@@ -326,7 +326,7 @@ mkdir -p "$STAGE_EXEC/packages" "$STAGE_EXEC/HMGAPI/updates" \
 # Populate HMGAPI/FORCE and ordered HMGAPI/updates/*.hmgapi.zip
 for d in "$STAGE_EXEC" "$STAGE_LIST" "$STAGE_UPD"; do
     : > "$d/HMGAPI/FORCE"
-    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3.hmgapi.zip" "$d/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip"
+    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.4.hmgapi.zip" "$d/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/adb-v${ADB_VER}.hmgapi.zip"            "$d/HMGAPI/updates/02-adb.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0.hmgapi.zip"              "$d/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v${EGMP_VER}.hmgapi.zip"    "$d/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
@@ -337,7 +337,7 @@ done
 # Populate NEMESIS packages/ folder for both NEMESIS sticks
 for d in "$STAGE_EXEC" "$STAGE_LIST"; do
     cp "$CORE_NEM_PKG"                                                         "$d/packages/hmgapi.zip"
-    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.3-nemesis-package.zip" "$d/packages/hmgapi.wireless-carplay-aa.zip"
+    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.4-nemesis-package.zip" "$d/packages/hmgapi.wireless-carplay-aa.zip"
     cp "$SUITE_ROOT/dist/mods/adb-v${ADB_VER}-nemesis-package.zip"            "$d/packages/hmgapi.adb.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0-nemesis-package.zip"              "$d/packages/hmgapi.aa-dpi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v${EGMP_VER}-nemesis-package.zip"    "$d/packages/hmgapi.egmp-aa-ev.zip"
@@ -365,7 +365,7 @@ published=${TODAY}
 
 [package.1]
 path=packages/hmgapi.wireless-carplay-aa.zip
-name=Wireless CarPlay + Android Auto (2.2.3)
+name=Wireless CarPlay + Android Auto (2.2.4)
 short-desc=Wireless CP/AA (TBT & compass overhaul), AR HUD/cluster intersections, BT focus & freeze fixes
 published=${TODAY}
 

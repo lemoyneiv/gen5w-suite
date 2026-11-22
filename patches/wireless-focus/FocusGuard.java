@@ -247,6 +247,7 @@ public final class FocusGuard {
                 aaSessionUp = true;
                 if (!active(mod)) return;
                 sendFocusBroadcast(mod, app.context, "aa", "connected");
+                scheduleLocalStandbyResumeReclaim(mod, app.context, FocusPolicy.SOURCE_ANDROID_AUTO, 1100L, 0);
             }
         });
         MethodHook ended = new MethodHook() {
@@ -254,6 +255,7 @@ public final class FocusGuard {
             protected void beforeHookedMethod(Param p) {
                 if (!aaSessionUp) return;
                 aaSessionUp = false;
+                cancelReclaims();
                 if (active(mod)) sendFocusBroadcast(mod, app.context, "aa", "disconnected");
             }
         };
@@ -290,6 +292,7 @@ public final class FocusGuard {
                 cpSessionUp = true;
                 if (!active(mod)) return;
                 sendFocusBroadcast(mod, app.context, "cp", "connected");
+                scheduleLocalStandbyResumeReclaim(mod, app.context, FocusPolicy.SOURCE_CARPLAY, 1100L, 0);
             }
         });
         mod.hook(cl, "dipo.carplay.session_finalized", new MethodHook() {
@@ -297,6 +300,7 @@ public final class FocusGuard {
             protected void afterHookedMethod(Param p) {
                 if (!cpSessionUp) return;
                 cpSessionUp = false;
+                cancelReclaims();
                 if (active(mod)) sendFocusBroadcast(mod, app.context, "cp", "disconnected");
             }
         });
@@ -377,7 +381,9 @@ public final class FocusGuard {
                 int audio = micomAudioMode(context);
                 boolean pgsCam = isPgsCameraActive();
                 String top = topPackage(context);
-                int action = POLICY.decideReclaim(cp, aa, mode, audio, pgsCam, top, now());
+                long t = now();
+                boolean standbyResume = FocusPolicy.isStandbyProjectionResumeActiveOnDevice(t);
+                int action = POLICY.decideReclaim(cp, aa, mode, audio, pgsCam, top, standbyResume, t);
                 if (action == FocusPolicy.ACTION_DEFER_CAMERA) {
                     if (attempt < MAX_CAMERA_RETRIES) {
                         scheduleReclaim(mod, context, 1000L, attempt + 1);
@@ -389,10 +395,48 @@ public final class FocusGuard {
                     try {
                         context.sendBroadcast(new Intent(shortcut));
                         mod.log("projection focus: startup reclaim -> " + shortcut
-                                + " (mode=" + mode + ", audio=" + audio + ", top=" + top + ")");
-                    } catch (Throwable t) {
-                        mod.error("projection focus reclaim", t);
+                                + " (mode=" + mode + ", audio=" + audio + ", standbyResume=" + standbyResume + ", top=" + top + ")");
+                    } catch (Throwable ex) {
+                        mod.error("projection focus reclaim", ex);
                     }
+                }
+            }
+        };
+        mainHandler().postAtTime(r, RECLAIM_TOKEN, SystemClock.uptimeMillis() + Math.max(0L, delayMs));
+    }
+
+    /**
+     * In-process backup reclaim inside DiPO / GPM strictly for post-Dark-Standby Projection
+     * resume (in case HKMC_BtAudio had not yet started or received PROJECTION_FOCUS). No-ops
+     * if Projection is already foreground, defers while any camera is active, and fires at most once.
+     */
+    static void scheduleLocalStandbyResumeReclaim(final ModContext mod, final Context context,
+                                                  final int source, long delayMs, final int attempt) {
+        if (context == null) return;
+        Runnable r = new Runnable() {
+            @Override
+            public void run() {
+                if (!active(mod)) return;
+                boolean live = source == FocusPolicy.SOURCE_CARPLAY ? cpSessionUp : aaSessionUp;
+                if (!live) return;
+                long t = now();
+                if (!FocusPolicy.isStandbyProjectionResumeActiveOnDevice(t)) return;
+                int mode = currentMode(context);
+                if (mode == FocusPolicy.MODE_CARPLAY || mode == FocusPolicy.MODE_ANDROID_AUTO) return;
+                if (FocusPolicy.isCameraActive(isPgsCameraActive(), topPackage(context))) {
+                    if (attempt < MAX_CAMERA_RETRIES) {
+                        scheduleLocalStandbyResumeReclaim(mod, context, source, 1000L, attempt + 1);
+                    }
+                    return;
+                }
+                String shortcut = source == FocusPolicy.SOURCE_CARPLAY
+                        ? FocusPolicy.SHORTCUT_CARPLAY
+                        : FocusPolicy.SHORTCUT_ANDROID_AUTO;
+                try {
+                    context.sendBroadcast(new Intent(shortcut));
+                    mod.log("projection focus: post-standby fallback reclaim -> " + shortcut + " (mode=" + mode + ")");
+                } catch (Throwable ex) {
+                    mod.error("projection focus post-standby reclaim", ex);
                 }
             }
         };

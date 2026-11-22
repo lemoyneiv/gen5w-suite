@@ -5,7 +5,7 @@ working copies of the three patched HMG-API mods (while `adb` and `egmp-aa-ev`
 consume unmodified official upstream-signed release archives and `hmgapi-comfort`
 builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
 
-  1. wireless-carplay-aa (2.2.3 on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c):
+  1. wireless-carplay-aa (2.2.4 on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c):
      - Built on `feat/tbt-overhaul-and-cleanup` (`262554c`, based on Open-HMG
        `v2.2.0-rc.9`): dynamic native cluster & AR HUD intersection scenes
        (`tbt_standard` default `true`), `NaviBridge` immediate DisplayType 8 idle
@@ -226,7 +226,7 @@ DIPO_PICTURE_BLOCK = """    static Handler pictureHandler;
 
 
 def patch_wireless(repo: Path) -> None:
-    print("== Preparing wireless-carplay-aa 2.2.3 (on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c)")
+    print("== Preparing wireless-carplay-aa 2.2.4 (on lemoyneiv/hmgapi-wireless-cp-aa @ 262554c)")
 
     # Verify Watchdog was never introduced anywhere
     assert not (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Watchdog.java").exists()
@@ -247,7 +247,7 @@ def patch_wireless(repo: Path) -> None:
     # Update mod.json (preserve 262554c system matrix, wifi.projection, trap-frame hooks, CarPlay identity, and conflicts)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "2.2.3"
+    mod["version"] = "2.2.4"
     mod["hmgapi"] = ">=1.1.1"
     assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in 262554c mod.json, got {mod.get('wifi')}"
     assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in mod.json"

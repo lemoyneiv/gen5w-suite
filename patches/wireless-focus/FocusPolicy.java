@@ -203,6 +203,20 @@ public final class FocusPolicy {
                                           int currentMode, int micomAudioMode,
                                           boolean pgsCameraActive, String topPackage,
                                           long nowMs) {
+        return decideReclaim(liveCp, liveAa, currentMode, micomAudioMode, pgsCameraActive, topPackage, false, nowMs);
+    }
+
+    /**
+     * Evaluates whether a newly connected projection session should reclaim focus
+     * once during the startup window — either from boot-raced Bluetooth Audio, or
+     * from ModeManager's involuntary FM Radio fallback after Pitch-Black Dark Standby
+     * tore down an active Phone Projection session (verified via {@code projection-resume.json}).
+     */
+    public synchronized int decideReclaim(boolean liveCp, boolean liveAa,
+                                          int currentMode, int micomAudioMode,
+                                          boolean pgsCameraActive, String topPackage,
+                                          boolean standbyProjectionResume,
+                                          long nowMs) {
         observeMode(currentMode);
         long deadline = cameraDeferring ? connectStartedAt + MAX_CAMERA_DEFER_MS : connectWindowUntil;
         if (!reclaimPending || activeSource == SOURCE_NONE || nowMs >= deadline) {
@@ -223,11 +237,13 @@ public final class FocusPolicy {
                 || micomAudioMode == MICOM_BT_AUDIO
                 || PKG_BTAUDIO.equals(topPackage)
                 || (preemptedBtFocus && currentMode == MODE_NONE);
+        boolean shouldReclaim = btHolding
+                || (standbyProjectionResume && currentMode != MODE_CARPLAY && currentMode != MODE_ANDROID_AUTO);
 
         reclaimPending = false;
         cameraDeferring = false;
         preemptedBtFocus = false;
-        if (!btHolding) {
+        if (!shouldReclaim) {
             return ACTION_NONE;
         }
         return activeSource == SOURCE_CARPLAY ? ACTION_RECLAIM_CARPLAY : ACTION_RECLAIM_ANDROID_AUTO;
@@ -258,9 +274,41 @@ public final class FocusPolicy {
         preemptedBtFocus = false;
     }
 
-    // ---- Parked Keep-Awake & Home Wi-Fi wlan0 ownership guard for Bridge ----
+    // ---- Parked Keep-Awake, Home Wi-Fi wlan0 ownership & Post-Standby Projection Resume ----
 
     public static final long LEASE_FRESHNESS_MS = 30_000L;
+    public static final long PROJECTION_RESUME_LEASE_MS = 45_000L;
+
+    public static boolean isStandbyProjectionResumeActiveOnDevice(long nowElapsedMs) {
+        String curBoot = readSmallUtf8(new java.io.File("/proc/sys/kernel/random/boot_id")).trim();
+        String resumeJson = readSmallUtf8(new java.io.File("/data/hmgapi/public/projection-resume.json"));
+        return isStandbyProjectionResumeActive(curBoot, nowElapsedMs, resumeJson);
+    }
+
+    public static boolean isStandbyProjectionResumeActive(
+            String curBootId,
+            long nowElapsedMs,
+            String resumeJson) {
+        if (resumeJson == null || resumeJson.isEmpty()) return false;
+        long preMode = extractJsonLong(resumeJson, "preMode", -1L);
+        if (preMode != MODE_CARPLAY && preMode != MODE_ANDROID_AUTO) {
+            return false;
+        }
+        String boot = extractJsonString(resumeJson, "bootId");
+        String cur = curBootId == null ? "" : curBootId.trim();
+        if (!cur.isEmpty() && !boot.isEmpty() && !cur.equals(boot)) {
+            return false;
+        }
+        long exp = extractJsonLong(resumeJson, "expiresAtElapsedMs", -1L);
+        if (exp > 0L && nowElapsedMs >= exp) {
+            return false;
+        }
+        long resumedAt = extractJsonLong(resumeJson, "resumedAtElapsedMs", -1L);
+        if (resumedAt > 0L && nowElapsedMs > 0L && Math.abs(nowElapsedMs - resumedAt) > PROJECTION_RESUME_LEASE_MS) {
+            return false;
+        }
+        return true;
+    }
 
     public static boolean isHomeWifiOrParkedLeaseActiveOnDevice(long nowElapsedMs, String wpaSupplicantProp) {
         String curBoot = readSmallUtf8(new java.io.File("/proc/sys/kernel/random/boot_id")).trim();

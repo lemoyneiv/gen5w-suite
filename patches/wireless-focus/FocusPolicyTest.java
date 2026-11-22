@@ -162,6 +162,30 @@ public final class FocusPolicyTest {
                 FocusPolicy.shouldSuppressBridgeForHomeWifiOrPark(
                         bootA, 120_000L, "running", "{\"state\": \"searching\"}", "", ""));
 
+        // 10. Post-Dark-Standby Projection resume over involuntary FM Radio fallback (projection-resume.json)
+        String validCpResume = "{\"bootId\":\"" + bootA + "\",\"preMode\":115,\"source\":\"cp\",\"resumedAtElapsedMs\":100000,\"expiresAtElapsedMs\":145000}";
+        check("Valid CarPlay projection-resume.json recognized",
+                FocusPolicy.isStandbyProjectionResumeActive(bootA, 109_000L, validCpResume));
+        check("Expired projection-resume.json ignored",
+                !FocusPolicy.isStandbyProjectionResumeActive(bootA, 146_000L, validCpResume));
+        check("Mismatched bootId in projection-resume.json ignored",
+                !FocusPolicy.isStandbyProjectionResumeActive(bootB, 109_000L, validCpResume));
+        check("Intentional pre-park FM Radio (preMode=11) NOT treated as projection resume",
+                !FocusPolicy.isStandbyProjectionResumeActive(bootA, 109_000L,
+                        "{\"bootId\":\"" + bootA + "\",\"preMode\":11,\"resumedAtElapsedMs\":100000,\"expiresAtElapsedMs\":145000}"));
+
+        FocusPolicy resumePolicy = new FocusPolicy();
+        resumePolicy.onProjectionEvent(FocusPolicy.SOURCE_CARPLAY, "connected", 108_500L);
+        check("Post-standby CarPlay resume still defers while reverse camera is up",
+                resumePolicy.decideReclaim(true, false, 11, 1, true, "com.daudio.app.launcher", true, 109_000L)
+                        == FocusPolicy.ACTION_DEFER_CAMERA);
+        check("Post-standby CarPlay resume reclaims once over involuntary FM fallback (mode 11) once camera closes",
+                resumePolicy.decideReclaim(true, false, 11, 1, false, "com.daudio.app.launcher", true, 110_000L)
+                        == FocusPolicy.ACTION_RECLAIM_CARPLAY);
+        check("Post-standby CarPlay resume never fires a second time",
+                resumePolicy.decideReclaim(true, false, 11, 1, false, "com.daudio.app.launcher", true, 111_000L)
+                        == FocusPolicy.ACTION_NONE);
+
         System.out.println("ok    FocusPolicy: " + passed + " checks (no car access)");
     }
 }
