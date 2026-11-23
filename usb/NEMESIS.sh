@@ -2,7 +2,7 @@
 # Gen5W Suite Unified One-Tap Installer (executed by NEMESIS USB Handler as root).
 #
 # 1. Uninstalls legacy/competing standalone NEMESIS packages if installed.
-# 2. Installs or updates HMG-API Core 1.1.1-rc.19 (Home Wi-Fi + BLE + VehicleHub + QuickBoot).
+# 2. Installs or updates HMG-API Core 1.1.1-rc.20 (Home Wi-Fi + BLE + VehicleHub + QuickBoot).
 # 3. Verifies/enables the car's hook map (260507 + 260903) and pre-grants
 #    owner permissions for comfort and EV preconditioning commands.
 # 4. Installs all signed suite mods (preserving existing user settings across
@@ -142,7 +142,7 @@ if [ "$(getprop sys.boot_completed)" = 1 ]; then
 fi
 rm -rf /data/local/coldstart-heat /data/leafia /data/evergreen >/dev/null 2>&1
 
-# 2. Install or update HMG-API Core 1.1.1-rc.19 via NEMESIS
+# 2. Install or update HMG-API Core 1.1.1-rc.20 via NEMESIS
 if [ -f /data/nemesis/apps/hmgapi/NEMESIS.data ]; then
     msg "Updating HMG-API Core from packages/hmgapi.zip"
     out=$("$NEMESIS" install --update --force --accept-risk "$USB/packages/hmgapi.zip" 2>&1) || fail_install "HMG-API update failed: $out"

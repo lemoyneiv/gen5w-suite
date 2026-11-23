@@ -5,7 +5,7 @@ working copies of the three patched HMG-API mods (while `adb` and `egmp-aa-ev`
 consume unmodified official upstream-signed release archives and `hmgapi-comfort`
 builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
 
-  1. wireless-carplay-aa (2.2.6 on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a):
+  1. wireless-carplay-aa (2.2.7 on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a):
      - Built on `feat/tbt-overhaul-and-cleanup` (`084486a`, based on Open-HMG
        `v2.2.0-rc.9`): dynamic native cluster & AR HUD intersection scenes
        (`tbt_standard` default `true`), `NaviBridge` immediate DisplayType 8 idle
@@ -226,7 +226,7 @@ DIPO_PICTURE_BLOCK = """    static Handler pictureHandler;
 
 
 def patch_wireless(repo: Path) -> None:
-    print("== Preparing wireless-carplay-aa 2.2.6 (on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a)")
+    print("== Preparing wireless-carplay-aa 2.2.7 (on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a)")
 
     # Verify Watchdog was never introduced anywhere
     assert not (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Watchdog.java").exists()
@@ -247,7 +247,7 @@ def patch_wireless(repo: Path) -> None:
     # Update mod.json (preserve 084486a system matrix, wifi.projection, trap-frame hooks, CarPlay identity, and conflicts)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "2.2.6"
+    mod["version"] = "2.2.7"
     mod["hmgapi"] = ">=1.1.1"
     assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in 084486a mod.json, got {mod.get('wifi')}"
     assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in mod.json"
@@ -272,6 +272,7 @@ def patch_wireless(repo: Path) -> None:
     pts["gpm.sensor_source.init"] = "observe"
     pts["gpm.receiver_service.disconnected"] = "observe"
     pts["gpm.receiver_service.on_create"] = "observe"
+    pts["gpm.receiver_service.connect_wireless_session"] = "observe"
     write_json(mod_path, mod)
 
     # Update settings.json (keep 084486a tbt_standard=True, add PR #56 projection_focus=True, PR #16 picture, PR #28 wifi_direct)

@@ -76,6 +76,9 @@ public final class FocusPolicy {
     private boolean preemptedBtFocus;
     private boolean cpConnected;
     private boolean aaConnected;
+    private boolean btUserSelected;
+    private boolean sawBtModeSinceSelect;
+    private long btUserSelectedAtMs;
 
     public static int parseSource(String s) {
         if ("cp".equals(s)) return SOURCE_CARPLAY;
@@ -98,6 +101,87 @@ public final class FocusPolicy {
         return false;
     }
 
+    public static boolean isIdleLauncherTop(String topPackage) {
+        if (topPackage == null || topPackage.isEmpty()) return true;
+        return "com.android.launcher3".equals(topPackage)
+                || "com.daudio.app.launcher".equals(topPackage)
+                || "com.hkmc.app.launcher".equals(topPackage);
+    }
+
+    /**
+     * Determines whether Bluetooth Audio activity belongs to a second (passenger)
+     * phone rather than a spurious AVRCP bounce from the phone currently projected
+     * over Wireless CarPlay or Android Auto.
+     */
+    public static boolean isOtherPhoneBtAudioActive(
+            int activeSource,
+            String aaBtAddr,
+            String cpBtAddr,
+            String playingBtAddr,
+            String a2dp1Addr,
+            String a2dp2Addr,
+            boolean btConnectWithOther) {
+        String aa = normalizeBtMac(aaBtAddr);
+        String cp = normalizeBtMac(cpBtAddr);
+        String playing = normalizeBtMac(playingBtAddr);
+        String a1 = normalizeBtMac(a2dp1Addr);
+        String a2 = normalizeBtMac(a2dp2Addr);
+
+        String proj;
+        if (activeSource == SOURCE_ANDROID_AUTO) {
+            proj = !aa.isEmpty() ? aa : cp;
+        } else {
+            proj = !cp.isEmpty() ? cp : aa;
+        }
+
+        if (!playing.isEmpty() && !proj.isEmpty()) {
+            return !playing.equals(proj);
+        }
+        if (btConnectWithOther) {
+            return true;
+        }
+        if (!proj.isEmpty()) {
+            if (!a1.isEmpty() && !a1.equals(proj)) return true;
+            if (!a2.isEmpty() && !a2.equals(proj)) return true;
+        }
+        return false;
+    }
+
+    public synchronized int activeSource() {
+        return activeSource;
+    }
+
+    public synchronized boolean hasConnectedProjection() {
+        return cpConnected || aaConnected;
+    }
+
+    /**
+     * Synchronizes live CarPlay / Android Auto connection state and ModeManager mode
+     * inside {@code HKMC_BtAudio} in case {@code HKMC_BtAudio} spawned after the initial
+     * {@code PROJECTION_FOCUS} broadcast or missed a mode transition back to projection.
+     */
+    public synchronized void syncLiveProjectionState(boolean liveCp, boolean liveAa, int currentMode, long nowMs) {
+        if (liveCp && !cpConnected) {
+            cpConnected = true;
+            if (activeSource == SOURCE_NONE) activeSource = SOURCE_CARPLAY;
+        } else if (!liveCp && cpConnected && nowMs >= connectWindowUntil) {
+            cpConnected = false;
+            if (activeSource == SOURCE_CARPLAY) activeSource = otherConnectedSource();
+        }
+        if (liveAa && !aaConnected) {
+            aaConnected = true;
+            if (activeSource == SOURCE_NONE) activeSource = SOURCE_ANDROID_AUTO;
+        } else if (!liveAa && aaConnected && nowMs >= connectWindowUntil) {
+            aaConnected = false;
+            if (activeSource == SOURCE_ANDROID_AUTO) activeSource = otherConnectedSource();
+        }
+        if (!cpConnected && !aaConnected && nowMs >= connectingUntil) {
+            activeSource = SOURCE_NONE;
+            clearBtUserSelected();
+        }
+        observeMode(currentMode, nowMs);
+    }
+
     /**
      * Records a projection lifecycle signal ("connecting", "connected",
      * "aborted", "disconnected").
@@ -114,6 +198,7 @@ public final class FocusPolicy {
             activeSource = source;
             connectingUntil = nowMs + CONNECTING_LEASE_MS;
             sawProjectionForeground = false;
+            clearBtUserSelected();
             return true;
         }
         if ("connected".equals(state)) {
@@ -126,12 +211,14 @@ public final class FocusPolicy {
             reclaimPending = true;
             cameraDeferring = false;
             sawProjectionForeground = false;
+            clearBtUserSelected();
             return true;
         }
         if ("aborted".equals(state)) {
             if (activeSource == source && !isSourceConnected(source)) {
                 clearStartupWindow();
                 activeSource = otherConnectedSource();
+                if (activeSource == SOURCE_NONE) clearBtUserSelected();
             }
             return false;
         }
@@ -140,6 +227,9 @@ public final class FocusPolicy {
             if (activeSource == source) {
                 clearStartupWindow();
                 activeSource = otherConnectedSource();
+            }
+            if (activeSource == SOURCE_NONE) {
+                clearBtUserSelected();
             }
             return false;
         }
@@ -157,47 +247,79 @@ public final class FocusPolicy {
 
     /** Updates foreground tracking when ModeManager reports the current mode. */
     public synchronized void observeMode(int currentMode) {
-        if ((activeSource == SOURCE_CARPLAY && currentMode == MODE_CARPLAY)
-                || (activeSource == SOURCE_ANDROID_AUTO && currentMode == MODE_ANDROID_AUTO)) {
+        observeMode(currentMode, 0L);
+    }
+
+    public synchronized void observeMode(int currentMode, long nowMs) {
+        if (currentMode == MODE_BT_AUDIO && btUserSelected) {
+            sawBtModeSinceSelect = true;
+        }
+        boolean inProjectionMode = (currentMode == MODE_CARPLAY && (activeSource == SOURCE_CARPLAY || cpConnected))
+                || (currentMode == MODE_ANDROID_AUTO && (activeSource == SOURCE_ANDROID_AUTO || aaConnected));
+        if (inProjectionMode) {
             sawProjectionForeground = true;
             reclaimPending = false;
             cameraDeferring = false;
+            if (btUserSelected && (sawBtModeSinceSelect
+                    || (nowMs > 0L && btUserSelectedAtMs > 0L && nowMs - btUserSelectedAtMs >= 2_500L))) {
+                clearBtUserSelected();
+            }
         }
     }
 
     /**
-     * Called when Bluetooth Audio's own Activity resumes. Self-launches from
-     * inside HKMC_BtAudio are already blocked during the startup window, so an
-     * Activity resume after projection reached the foreground (or after startup
-     * reclaim settled) means the driver explicitly chose Bluetooth Audio. Ends
-     * the startup window immediately and never schedules a reclaim.
+     * Called when Bluetooth Audio's own Activity starts/resumes. Self-launches from
+     * inside HKMC_BtAudio are already blocked while projection is connecting or active
+     * on the same phone, so an Activity open from Launcher / Media Menu means the driver
+     * explicitly chose Bluetooth Audio. Unblocks BT Audio until the driver switches back
+     * to CarPlay / Android Auto.
      */
     public synchronized void onBtScreenOpened(int currentMode, long nowMs) {
-        observeMode(currentMode);
-        if (sawProjectionForeground || (!reclaimPending && connectWindowUntil > 0L && nowMs >= connectStartedAt)) {
+        if (sawProjectionForeground
+                || !inStartupWindow(nowMs)
+                || (!reclaimPending && connectWindowUntil > 0L && nowMs >= connectStartedAt)) {
+            btUserSelected = true;
+            btUserSelectedAtMs = Math.max(1L, nowMs);
+            sawBtModeSinceSelect = (currentMode == MODE_BT_AUDIO);
             clearStartupWindow();
         }
     }
 
     /**
-     * Declines Bluetooth Audio media focus requests strictly during the bounded
-     * startup/connect window. Mid-session requests (driver switching to BT Audio
-     * or a passenger phone streaming over Bluetooth) are never blocked.
+     * Declines Bluetooth Audio media focus requests during the startup/connect window
+     * AND throughout an active projection session when only the projected phone itself
+     * is connected over Bluetooth (preventing mid-drive AVRCP focus steals), while
+     * immediately allowing passenger dual-phone A2DP or explicit driver BT Audio selection.
      */
     public synchronized boolean shouldBlockBtAudioFocus(int streamType, int mode, long nowMs) {
-        if (streamType == STREAM_VOICE_CALL || streamType == STREAM_RING) return false;
-        if (mode != 0 && mode != MODE_BT_AUDIO) return false;
-        return inStartupWindow(nowMs);
+        return shouldBlockBtAudioFocus(streamType, mode, false, nowMs);
     }
 
-    /** Suppresses HKMC_BtAudio self-launching its UI strictly during startup/connect. */
+    public synchronized boolean shouldBlockBtAudioFocus(
+            int streamType, int mode, boolean otherPhoneBtActive, long nowMs) {
+        if (streamType == STREAM_VOICE_CALL || streamType == STREAM_RING) return false;
+        if (mode != 0 && mode != MODE_BT_AUDIO) return false;
+        if (btUserSelected) return false;
+        if (inStartupWindow(nowMs)) return true;
+        return (cpConnected || aaConnected) && !otherPhoneBtActive;
+    }
+
+    /** Suppresses HKMC_BtAudio self-launching its UI during startup or same-phone projection. */
     public synchronized boolean shouldBlockBtActivityLaunch(String targetPackage, long nowMs) {
-        return PKG_BTAUDIO.equals(targetPackage) && inStartupWindow(nowMs);
+        return shouldBlockBtActivityLaunch(targetPackage, false, nowMs);
+    }
+
+    public synchronized boolean shouldBlockBtActivityLaunch(
+            String targetPackage, boolean otherPhoneBtActive, long nowMs) {
+        if (!PKG_BTAUDIO.equals(targetPackage)) return false;
+        if (btUserSelected) return false;
+        if (inStartupWindow(nowMs)) return true;
+        return (cpConnected || aaConnected) && !otherPhoneBtActive;
     }
 
     /**
      * Evaluates whether a newly connected projection session should reclaim focus
-     * from Bluetooth Audio once during the startup window.
+     * from Bluetooth Audio or an idle cold-boot Launcher screen once during startup.
      */
     public synchronized int decideReclaim(boolean liveCp, boolean liveAa,
                                           int currentMode, int micomAudioMode,
@@ -208,18 +330,18 @@ public final class FocusPolicy {
 
     /**
      * Evaluates whether a newly connected projection session should reclaim focus
-     * once during the startup window — either from boot-raced Bluetooth Audio, or
-     * from ModeManager's involuntary FM Radio fallback after Pitch-Black Dark Standby
-     * tore down an active Phone Projection session (verified via {@code projection-resume.json}).
+     * once during the startup window — from boot-raced Bluetooth Audio, from an idle
+     * cold-boot Home Screen ({@code MODE_NONE} with no active audio source), or from
+     * ModeManager's involuntary FM Radio fallback after Pitch-Black Dark Standby.
      */
     public synchronized int decideReclaim(boolean liveCp, boolean liveAa,
                                           int currentMode, int micomAudioMode,
                                           boolean pgsCameraActive, String topPackage,
                                           boolean standbyProjectionResume,
                                           long nowMs) {
-        observeMode(currentMode);
+        observeMode(currentMode, nowMs);
         long deadline = cameraDeferring ? connectStartedAt + MAX_CAMERA_DEFER_MS : connectWindowUntil;
-        if (!reclaimPending || activeSource == SOURCE_NONE || nowMs >= deadline) {
+        if (!reclaimPending || activeSource == SOURCE_NONE || nowMs >= deadline || btUserSelected) {
             reclaimPending = false;
             cameraDeferring = false;
             return ACTION_NONE;
@@ -237,7 +359,11 @@ public final class FocusPolicy {
                 || micomAudioMode == MICOM_BT_AUDIO
                 || PKG_BTAUDIO.equals(topPackage)
                 || (preemptedBtFocus && currentMode == MODE_NONE);
+        boolean idleLauncherAtStartup = currentMode == MODE_NONE
+                && micomAudioMode <= 0
+                && isIdleLauncherTop(topPackage);
         boolean shouldReclaim = btHolding
+                || idleLauncherAtStartup
                 || (standbyProjectionResume && currentMode != MODE_CARPLAY && currentMode != MODE_ANDROID_AUTO);
 
         reclaimPending = false;
@@ -262,6 +388,12 @@ public final class FocusPolicy {
         if (cpConnected) return SOURCE_CARPLAY;
         if (aaConnected) return SOURCE_ANDROID_AUTO;
         return SOURCE_NONE;
+    }
+
+    private void clearBtUserSelected() {
+        btUserSelected = false;
+        sawBtModeSinceSelect = false;
+        btUserSelectedAtMs = 0L;
     }
 
     private void clearStartupWindow() {

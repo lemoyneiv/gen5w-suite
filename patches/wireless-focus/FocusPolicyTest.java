@@ -95,20 +95,61 @@ public final class FocusPolicyTest {
                 p.decideReclaim(true, false, FocusPolicy.MODE_BT_AUDIO, FocusPolicy.MICOM_BT_AUDIO, false, FocusPolicy.PKG_BTAUDIO, 7200L)
                         == FocusPolicy.ACTION_NONE);
 
-        // 6. Review #2: Passenger's phone streams over Bluetooth Audio during an active AA session
+        // 6. Mid-session same-phone AVRCP steal blocked vs. Passenger 2nd-phone A2DP allowed (Review #2 + 131713 fix)
         p = new FocusPolicy();
         p.onProjectionEvent(FocusPolicy.SOURCE_ANDROID_AUTO, "connected", 8000L);
         int aaAct = p.decideReclaim(false, true, FocusPolicy.MODE_BT_AUDIO, FocusPolicy.MICOM_BT_AUDIO, false, "com.daudio.app.launcher", 8400L);
         check("Android Auto reclaims boot ModeType 54 once", aaAct == FocusPolicy.ACTION_RECLAIM_ANDROID_AUTO);
         check("Android Auto shortcut matches GPM_CUSTOM_SHORTCUT",
                 FocusPolicy.SHORTCUT_ANDROID_AUTO.equals(FocusPolicy.shortcutForAction(aaAct)));
-        check("startup window still guards immediate post-connect AVRCP bounce at +2 s",
-                p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, 10_000L));
-        check("after 8 s startup window, passenger phone Bluetooth streaming is allowed while AA stays connected",
-                !p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, 8000L + FocusPolicy.CONNECT_WINDOW_MS));
+        check("startup window guards immediate post-connect AVRCP bounce at +2 s (even with otherPhone=true)",
+                p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, true, 10_000L));
+        check("mid-session (+104 s): same projected phone AVRCP bounce is BLOCKED from stealing focus or self-launching UI",
+                p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, false, 104_700L)
+                        && p.shouldBlockBtActivityLaunch(FocusPolicy.PKG_BTAUDIO, false, 104_700L));
+        check("mid-session (+16 s): passenger's 2nd phone A2DP streaming is ALLOWED while AA stays connected",
+                !p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, true, 8000L + FocusPolicy.CONNECT_WINDOW_MS)
+                        && !p.shouldBlockBtActivityLaunch(FocusPolicy.PKG_BTAUDIO, true, 8000L + FocusPolicy.CONNECT_WINDOW_MS));
         check("duplicate connecting signal while AA is already up does NOT re-block passenger BT Audio",
                 !p.onProjectionEvent(FocusPolicy.SOURCE_ANDROID_AUTO, "connecting", 30_000L)
-                        && !p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, 30_500L));
+                        && !p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, true, 30_500L));
+        // Driver explicitly opens BT Audio screen at +110 s (even while mode is still 116 before focus request) -> unblocks, then resets on return to AA
+        p.onBtScreenOpened(FocusPolicy.MODE_ANDROID_AUTO, 110_000L);
+        p.syncLiveProjectionState(false, true, FocusPolicy.MODE_ANDROID_AUTO, 110_020L);
+        check("driver opening BT Audio UI from Home Screen unblocks focus request even before ModeManager leaves 116",
+                !p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, false, 110_020L));
+        p.observeMode(FocusPolicy.MODE_BT_AUDIO, 110_500L);
+        p.observeMode(FocusPolicy.MODE_ANDROID_AUTO, 120_000L);
+        check("switching back to Android Auto (mode 116) re-arms same-phone AVRCP steal protection",
+                p.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, false, 125_000L));
+
+        // 6b. IPPManager MAC classification + late-spawned HKMC_BtAudio live state sync + cold-boot idle-Launcher reclaim
+        check("isOtherPhoneBtAudioActive: same phone playing over AVRCP is NOT another phone",
+                !FocusPolicy.isOtherPhoneBtAudioActive(
+                        FocusPolicy.SOURCE_ANDROID_AUTO,
+                        "aa:bb:cc:11:22:a7", "", "AA:BB:CC:11:22:A7", "AA:BB:CC:11:22:A7", "", false));
+        check("isOtherPhoneBtAudioActive: second phone on a2dp2 IS another phone",
+                FocusPolicy.isOtherPhoneBtAudioActive(
+                        FocusPolicy.SOURCE_ANDROID_AUTO,
+                        "aa:bb:cc:11:22:a7", "", "", "AA:BB:CC:11:22:A7", "dd:ee:ff:44:55:66", false));
+        check("isOtherPhoneBtAudioActive: isBtConnectwithOther=true IS another phone",
+                FocusPolicy.isOtherPhoneBtAudioActive(
+                        FocusPolicy.SOURCE_CARPLAY,
+                        "", "aa:bb:cc:11:22:a7", "", "", "", true));
+        FocusPolicy lateBtProc = new FocusPolicy();
+        lateBtProc.syncLiveProjectionState(false, true, FocusPolicy.MODE_ANDROID_AUTO, 104_000L);
+        check("late-spawned HKMC_BtAudio process syncs live AA session and blocks same-phone AVRCP steal",
+                lateBtProc.shouldBlockBtAudioFocus(3, FocusPolicy.MODE_BT_AUDIO, false, 104_100L));
+        FocusPolicy coldIdle = new FocusPolicy();
+        coldIdle.onProjectionEvent(FocusPolicy.SOURCE_ANDROID_AUTO, "connected", 15_088L);
+        check("cold-boot idle Home Screen (MODE_NONE, micom<=0, com.android.launcher3) reclaims AA foreground once",
+                coldIdle.decideReclaim(false, true, FocusPolicy.MODE_NONE, 0, false, "com.android.launcher3", 15_500L)
+                        == FocusPolicy.ACTION_RECLAIM_ANDROID_AUTO);
+        FocusPolicy coldSettings = new FocusPolicy();
+        coldSettings.onProjectionEvent(FocusPolicy.SOURCE_ANDROID_AUTO, "connected", 15_088L);
+        check("cold-boot MODE_NONE while driver is actively in Settings is NOT yanked away",
+                coldSettings.decideReclaim(false, true, FocusPolicy.MODE_NONE, 0, false, "com.android.settings", 15_500L)
+                        == FocusPolicy.ACTION_NONE);
 
         // 7. FM/AM/SiriusXM Radio preservation: never hijack Radio even if BT focus was preempted earlier
         p = new FocusPolicy();

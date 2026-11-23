@@ -71,6 +71,9 @@ public final class FocusGuard {
     private static volatile Object sPgsService;
     private static volatile Object sGpmManager;
     private static volatile boolean sGpmManagerTried;
+    private static volatile Object sPpManager;
+    private static volatile long sBtSnapAtMs = -10_000L;
+    private static volatile boolean sCachedOtherPhoneBt;
 
     public static boolean active(ModContext mod) {
         return mod != null && mod.enabled() && mod.settingBoolean("projection_focus", true);
@@ -103,12 +106,13 @@ public final class FocusGuard {
                 int stream = (Integer) p.args[1];
                 int mode = p.args.length >= 4 ? (Integer) p.args[3] : 0;
                 long t = now();
-                if (POLICY.shouldBlockBtAudioFocus(stream, mode, t)) {
+                boolean otherPhone = syncAndCheckOtherPhoneBt(app.context, t);
+                if (POLICY.shouldBlockBtAudioFocus(stream, mode, otherPhone, t)) {
                     p.setResult(AudioManager.AUDIOFOCUS_REQUEST_FAILED);
                     if (t - lastBlockedLogAt >= LOG_THROTTLE_MS) {
                         lastBlockedLogAt = t;
-                        mod.log("projection focus: declined startup Bluetooth Audio requestAudioFocus (stream="
-                                + stream + ", mode=" + mode + ")");
+                        mod.log("projection focus: declined Bluetooth Audio requestAudioFocus (stream="
+                                + stream + ", mode=" + mode + ", startup=" + POLICY.inStartupWindow(t) + ")");
                     }
                 }
             }
@@ -158,9 +162,17 @@ public final class FocusGuard {
             protected void beforeHookedMethod(Param p) {
                 if (!active(mod)) return;
                 Intent intent = p.args.length > 0 && p.args[0] instanceof Intent ? (Intent) p.args[0] : null;
-                if (POLICY.shouldBlockBtActivityLaunch(targetPackage(intent), now())) {
+                String targetPkg = targetPackage(intent);
+                if (!FocusPolicy.PKG_BTAUDIO.equals(targetPkg)) return;
+                long t = now();
+                boolean otherPhone = syncAndCheckOtherPhoneBt(app.context, t);
+                if (POLICY.shouldBlockBtActivityLaunch(targetPkg, otherPhone, t)) {
                     p.setResult(null);
-                    mod.log("projection focus: suppressed startup Bluetooth Audio activity launch");
+                    if (t - lastBlockedLogAt >= LOG_THROTTLE_MS) {
+                        lastBlockedLogAt = t;
+                        mod.log("projection focus: suppressed Bluetooth Audio self-activity launch (startup="
+                                + POLICY.inStartupWindow(t) + ")");
+                    }
                 }
             }
         };
@@ -172,20 +184,22 @@ public final class FocusGuard {
             mod.error("projection focus: startActivity hooks", t);
         }
 
-        try {
-            Hooks.findAndHookMethod(Activity.class, "onResume", new MethodHook() {
-                @Override
-                protected void afterHookedMethod(Param p) {
-                    if (!active(mod)) return;
-                    long t = now();
-                    POLICY.onBtScreenOpened(currentMode(app.context), t);
-                    if (!POLICY.inStartupWindow(t)) {
-                        cancelReclaims();
-                    }
+        MethodHook screenOpenedHook = new MethodHook() {
+            @Override
+            protected void beforeHookedMethod(Param p) {
+                if (!active(mod)) return;
+                long t = now();
+                POLICY.onBtScreenOpened(currentMode(app.context), t);
+                if (!POLICY.inStartupWindow(t)) {
+                    cancelReclaims();
                 }
-            });
+            }
+        };
+        try {
+            Hooks.findAndHookMethod(Activity.class, "onStart", screenOpenedHook);
+            Hooks.findAndHookMethod(Activity.class, "onResume", screenOpenedHook);
         } catch (Throwable t) {
-            mod.error("projection focus: Activity.onResume hook", t);
+            mod.error("projection focus: Activity.onStart/onResume hook", t);
         }
 
         try {
@@ -212,13 +226,14 @@ public final class FocusGuard {
         }
 
         // If HKMC_BtAudio forked slightly after CarPlay/AA already connected during early boot,
-        // catch up once so boot-restored Mode 54 still yields to the active startup session.
+        // catch up once so boot-restored Mode 54 or idle Home Screen still yields to the active session.
         if (SystemClock.uptimeMillis() < BOOT_CATCHUP_UPTIME_MS) {
             mainHandler().postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     if (!active(mod) || POLICY.inStartupWindow(now())) return;
-                    if (currentMode(app.context) != FocusPolicy.MODE_BT_AUDIO) return;
+                    int mode = currentMode(app.context);
+                    if (mode != FocusPolicy.MODE_BT_AUDIO && mode != FocusPolicy.MODE_NONE) return;
                     int src = isCarPlayConnected(app.context) ? FocusPolicy.SOURCE_CARPLAY
                             : isAndroidAutoConnected(app.context) ? FocusPolicy.SOURCE_ANDROID_AUTO
                             : FocusPolicy.SOURCE_NONE;
@@ -230,7 +245,7 @@ public final class FocusGuard {
             }, 300L);
         }
 
-        mod.log("projection focus: startup focus guard active in " + app.processName);
+        mod.log("projection focus: focus guard active in " + app.processName);
     }
 
     public static void gpm(final ModContext mod, final LoadedApp app) {
@@ -240,6 +255,14 @@ public final class FocusGuard {
                 || !Points.has("gpm.receiver_service.disconnected")) {
             mod.log("projection focus: GPM hook points missing on this build; AA focus notifications off");
             return;
+        }
+        if (Points.has("gpm.receiver_service.connect_wireless_session")) {
+            mod.hook(cl, "gpm.receiver_service.connect_wireless_session", new MethodHook() {
+                @Override
+                protected void beforeHookedMethod(Param p) {
+                    onAaConnecting(mod, app.context);
+                }
+            });
         }
         mod.hook(cl, "gpm.sensor_source.init", new MethodHook() {
             @Override
@@ -406,9 +429,10 @@ public final class FocusGuard {
     }
 
     /**
-     * In-process backup reclaim inside DiPO / GPM strictly for post-Dark-Standby Projection
-     * resume (in case HKMC_BtAudio had not yet started or received PROJECTION_FOCUS). No-ops
-     * if Projection is already foreground, defers while any camera is active, and fires at most once.
+     * In-process backup reclaim inside DiPO / GPM for post-Dark-Standby Projection
+     * resume OR cold-boot idle-Launcher connect (when HKMC_BtAudio had not yet spawned
+     * to receive PROJECTION_FOCUS). No-ops if Projection is already foreground, defers
+     * while any camera is active, and fires at most once.
      */
     static void scheduleLocalStandbyResumeReclaim(final ModContext mod, final Context context,
                                                   final int source, long delayMs, final int attempt) {
@@ -420,27 +444,108 @@ public final class FocusGuard {
                 boolean live = source == FocusPolicy.SOURCE_CARPLAY ? cpSessionUp : aaSessionUp;
                 if (!live) return;
                 long t = now();
-                if (!FocusPolicy.isStandbyProjectionResumeActiveOnDevice(t)) return;
+                boolean standbyResume = FocusPolicy.isStandbyProjectionResumeActiveOnDevice(t);
                 int mode = currentMode(context);
                 if (mode == FocusPolicy.MODE_CARPLAY || mode == FocusPolicy.MODE_ANDROID_AUTO) return;
-                if (FocusPolicy.isCameraActive(isPgsCameraActive(), topPackage(context))) {
+                String top = topPackage(context);
+                if (FocusPolicy.isCameraActive(isPgsCameraActive(), top)) {
                     if (attempt < MAX_CAMERA_RETRIES) {
                         scheduleLocalStandbyResumeReclaim(mod, context, source, 1000L, attempt + 1);
                     }
                     return;
                 }
+                int audio = micomAudioMode(context);
+                boolean idleLauncher = mode == FocusPolicy.MODE_NONE
+                        && audio <= 0
+                        && FocusPolicy.isIdleLauncherTop(top);
+                if (!standbyResume && !idleLauncher) return;
                 String shortcut = source == FocusPolicy.SOURCE_CARPLAY
                         ? FocusPolicy.SHORTCUT_CARPLAY
                         : FocusPolicy.SHORTCUT_ANDROID_AUTO;
                 try {
                     context.sendBroadcast(new Intent(shortcut));
-                    mod.log("projection focus: post-standby fallback reclaim -> " + shortcut + " (mode=" + mode + ")");
+                    mod.log("projection focus: local fallback reclaim -> " + shortcut
+                            + " (mode=" + mode + ", audio=" + audio + ", standbyResume=" + standbyResume + ")");
                 } catch (Throwable ex) {
-                    mod.error("projection focus post-standby reclaim", ex);
+                    mod.error("projection focus local fallback reclaim", ex);
                 }
             }
         };
         mainHandler().postAtTime(r, RECLAIM_TOKEN, SystemClock.uptimeMillis() + Math.max(0L, delayMs));
+    }
+
+    static boolean syncAndCheckOtherPhoneBt(Context c, long nowMs) {
+        if (nowMs - sBtSnapAtMs < 400L) {
+            return sCachedOtherPhoneBt;
+        }
+        sBtSnapAtMs = nowMs;
+        String aaAddr = "";
+        String cpAddr = "";
+        String playingAddr = "";
+        String a2dp1Addr = "";
+        String a2dp2Addr = "";
+        boolean btWithOther = false;
+        Object pp = getPpManager();
+        if (pp != null) {
+            try {
+                aaAddr = invokePpString(pp, "getAAConnectedBTAddress");
+                cpAddr = invokePpString(pp, "getCPConnectedBTAddress");
+                playingAddr = invokePpString(pp, "getPlayingBtAudioDevice");
+                a2dp1Addr = invokePpString(pp, "getBtA2dp1ConnectDevice");
+                a2dp2Addr = invokePpString(pp, "getBtA2dp2ConnectDevice");
+                btWithOther = invokePpBoolean(pp, "isBtConnectwithOther")
+                        || invokePpBoolean(pp, "isBtConnectWithOther");
+            } catch (Throwable t) {
+                sPpManager = null;
+            }
+        }
+        boolean liveCp = !FocusPolicy.normalizeBtMac(cpAddr).isEmpty() || isCarPlayConnected(c);
+        boolean liveAa = !FocusPolicy.normalizeBtMac(aaAddr).isEmpty() || isAndroidAutoConnected(c);
+        POLICY.syncLiveProjectionState(liveCp, liveAa, currentMode(c), nowMs);
+        boolean other = FocusPolicy.isOtherPhoneBtAudioActive(
+                POLICY.activeSource(), aaAddr, cpAddr, playingAddr, a2dp1Addr, a2dp2Addr, btWithOther);
+        sCachedOtherPhoneBt = other;
+        return other;
+    }
+
+    private static Object getPpManager() {
+        Object pp = sPpManager;
+        if (pp != null) return pp;
+        try {
+            IBinder b = null;
+            if (Points.has("framework.service_manager.get_service")) {
+                b = (IBinder) Points.call(null, "framework.service_manager.get_service", null, "phoneprojection");
+            }
+            if (b == null) {
+                Class<?> sm = Class.forName("android.os.ServiceManager");
+                b = (IBinder) sm.getMethod("getService", String.class).invoke(null, "phoneprojection");
+            }
+            if (b == null) return null;
+            Class<?> stub = Class.forName("android.phoneprojection.IPPManager$Stub");
+            pp = stub.getMethod("asInterface", IBinder.class).invoke(null, b);
+            sPpManager = pp;
+            return pp;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static String invokePpString(Object pp, String method) {
+        try {
+            Object r = pp.getClass().getMethod(method).invoke(pp);
+            return r instanceof String ? (String) r : "";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static boolean invokePpBoolean(Object pp, String method) {
+        try {
+            Object r = pp.getClass().getMethod(method).invoke(pp);
+            return Boolean.TRUE.equals(r);
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     static void cancelReclaims() {
