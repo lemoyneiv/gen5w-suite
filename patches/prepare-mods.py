@@ -5,7 +5,7 @@ working copies of the three patched HMG-API mods (while `adb` and `egmp-aa-ev`
 consume unmodified official upstream-signed release archives and `hmgapi-comfort`
 builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
 
-  1. wireless-carplay-aa (2.2.5 on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a):
+  1. wireless-carplay-aa (2.2.6 on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a):
      - Built on `feat/tbt-overhaul-and-cleanup` (`084486a`, based on Open-HMG
        `v2.2.0-rc.9`): dynamic native cluster & AR HUD intersection scenes
        (`tbt_standard` default `true`), `NaviBridge` immediate DisplayType 8 idle
@@ -18,10 +18,10 @@ builds directly from its standalone `lemoyneiv/hmgapi-comfort` repository):
      - PR #16 picture subset: `Keyframes` CarPlay video decoder freeze IDR recovery
        (`picture`, `picture_periodic`, `picture_period`, NO `Watchdog`).
      - PR #28: opt-in `wifi_direct` part (off by default).
-     - PR #56: Projection Focus Arbitrator (`FocusGuard` / `FocusPolicy`), enabled
-       by default in Gen5W Suite so Phone Projection wins startup/connect focus
-       races against Bluetooth Audio while preserving FM/AM/SiriusXM Radio,
-       passenger BT streaming after startup, and reverse/AVM cameras.
+     - PR #56 + `ParkSession`: Projection Focus Arbitrator (`FocusGuard` /
+       `FocusPolicy`) plus per-boot RAM-only clean parked teardown (`ByeByeRequest(1)`
+       / `disconnectCarPlay()`) & SoftAP+BT-ready wireless reconnect
+       (`connectWirelessSession` / `restartBonjour` + `Bridge.ensureHotspot(null)`).
   2. aa-dpi (0.3.0):
      - nemesis_conflicts: ["aa.dpi"], defaults (dpi=200, tap_limit=false, video_window=6).
   3. light-vibes (0.7.0):
@@ -226,7 +226,7 @@ DIPO_PICTURE_BLOCK = """    static Handler pictureHandler;
 
 
 def patch_wireless(repo: Path) -> None:
-    print("== Preparing wireless-carplay-aa 2.2.5 (on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a)")
+    print("== Preparing wireless-carplay-aa 2.2.6 (on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a)")
 
     # Verify Watchdog was never introduced anywhere
     assert not (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Watchdog.java").exists()
@@ -247,12 +247,19 @@ def patch_wireless(repo: Path) -> None:
     # Update mod.json (preserve 084486a system matrix, wifi.projection, trap-frame hooks, CarPlay identity, and conflicts)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "2.2.5"
+    mod["version"] = "2.2.6"
     mod["hmgapi"] = ">=1.1.1"
     assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in 084486a mod.json, got {mod.get('wifi')}"
     assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in mod.json"
     assert "enhanced.projection" in mod.get("nemesis_conflicts", []), "Expected enhanced.projection in mod.json"
     add_coauthor(mod)
+
+    mod["car_events"] = {
+        "parked": {},
+        "unparked": {},
+        "shutdown": {},
+        "wake": {},
+    }
 
     if not any(p.get("id") == "wifi_direct" for p in mod["parts"]):
         mod["parts"].append({"id": "wifi_direct", "when": "settings.wifi_direct"})
@@ -264,6 +271,7 @@ def patch_wireless(repo: Path) -> None:
     pts["dipo.carplay.screen_timeout"] = "observe"
     pts["gpm.sensor_source.init"] = "observe"
     pts["gpm.receiver_service.disconnected"] = "observe"
+    pts["gpm.receiver_service.on_create"] = "observe"
     write_json(mod_path, mod)
 
     # Update settings.json (keep 084486a tbt_standard=True, add PR #56 projection_focus=True, PR #16 picture, PR #28 wifi_direct)
@@ -370,15 +378,16 @@ def patch_wireless(repo: Path) -> None:
     )
     write_json(patches_path, pdata)
 
-    # Install reviewed PR #56 FocusPolicy + FocusGuard and PR #16 Keyframes picture recovery
+    # Install reviewed PR #56 FocusPolicy + FocusGuard + ParkSession and PR #16 Keyframes picture recovery
     focus_src_dir = PATCH_DIR / "wireless-focus"
     picture_src_dir = PATCH_DIR / "wireless-picture"
     mod_wireless_dir = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless"
     shutil.copy2(focus_src_dir / "FocusPolicy.java", mod_wireless_dir / "FocusPolicy.java")
     shutil.copy2(focus_src_dir / "FocusGuard.java", mod_wireless_dir / "FocusGuard.java")
+    shutil.copy2(focus_src_dir / "ParkSession.java", mod_wireless_dir / "ParkSession.java")
     shutil.copy2(picture_src_dir / "Keyframes.java", mod_wireless_dir / "dipo/Keyframes.java")
 
-    # Wire Wireless.java (btaudio.ui + GPM hooks + DIPO entry condition)
+    # Wire Wireless.java (btaudio.ui + GPM hooks + ParkSession + DIPO entry condition)
     wireless_java = mod_wireless_dir / "Wireless.java"
     replace_exact(
         wireless_java,
@@ -400,10 +409,12 @@ def patch_wireless(repo: Path) -> None:
         if (FocusPolicy.PKG_BTAUDIO.equals(app.packageName) && mod.settingBoolean("projection_focus", true)) FocusGuard.btAudio(mod, app);
         if (GPM.equals(app.packageName) && (mod.settingBoolean("usb_drives", true) || mod.settingBoolean("projection_focus", true))) usbDrives(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("projection_focus", true)) FocusGuard.gpm(mod, app);
+        if (GPM.equals(app.packageName) && (mod.settingBoolean("projection_focus", true) || mod.settingBoolean("bridge", true))) ParkSession.gpm(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
         if ((SYSTEM_POPUP.equals(app.packageName) || LAUNCHER.equals(app.packageName) || SETTINGS_APP.equals(app.packageName))
                 && mod.settingBoolean("menu", true)) popupSettings(mod, app);
+        if (DIPO.equals(app.packageName) && (mod.settingBoolean("projection_focus", true) || mod.settingBoolean("bridge", true))) ParkSession.dipo(mod, app);
         if (DIPO.equals(app.packageName) && (mod.settingBoolean("tbt", true) || mod.settingBoolean("bridge", true) || mod.settingBoolean("audio", true) || mod.settingBoolean("picture", true) || mod.settingBoolean("projection_focus", true))) dipo(mod, app);
     }""",
         "Wireless.appLoaded",
@@ -480,7 +491,8 @@ def patch_wireless(repo: Path) -> None:
     )
 
     # Wire Bridge.java (notify FocusGuard during wireless CarPlay SPP handshake, skip post-disconnect onUsbGone,
-    # and suppress Bridge SPP/SoftAP while Home Wi-Fi or parked keep-awake owns wlan0)
+    # preserve ConnectivitySSID/ConnectivityPSK in ensureHotspot, and suppress Bridge SPP/SoftAP while Home Wi-Fi
+    # or parked keep-awake owns wlan0)
     replace_exact(
         bridge_java,
         "import hmgapi.hook.Points;\n",
@@ -600,7 +612,7 @@ java -cp "$CP" hmgapi.mods.wireless.dipo.KeyframesTest
     )
     picture_test_sh.chmod(picture_test_sh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
-    # Wire FocusPolicy + FocusGuard stubs & assertions in tools/aa-support
+    # Wire FocusPolicy + FocusGuard + ParkSession stubs & assertions in tools/aa-support
     aa_support_dir = repo / "wireless-carplay-aa/tools/aa-support"
     aa_support_root = aa_support_dir / "stubs"
     if aa_support_root.is_dir():
@@ -655,6 +667,32 @@ public final class FocusGuard {
 """,
             encoding="utf-8",
         )
+        (aa_support_root / "hmgapi/mods/wireless/ParkSession.java").write_text(
+            """package hmgapi.mods.wireless;
+
+import hmgapi.hook.LoadedApp;
+import hmgapi.hook.ModContext;
+
+public final class ParkSession {
+    public static int gpmCalls;
+    public static int dipoCalls;
+
+    public static void reset() {
+        gpmCalls = 0;
+        dipoCalls = 0;
+    }
+
+    public static void gpm(ModContext mod, LoadedApp app) {
+        gpmCalls++;
+    }
+
+    public static void dipo(ModContext mod, LoadedApp app) {
+        dipoCalls++;
+    }
+}
+""",
+            encoding="utf-8",
+        )
         replace_exact(
             aa_support_dir / "test/hmgapi/mods/wireless/AaSupportTest.java",
             """            Car.step = 105;
@@ -663,12 +701,14 @@ public final class FocusGuard {
             testNaviBridge(unknown);
 
             FocusGuard.reset();
+            ParkSession.reset();
             ModContext defaultFocus = enabled();
             wireless.appLoaded(defaultFocus, new LoadedApp(FocusPolicy.PKG_BTAUDIO));
             wireless.appLoaded(defaultFocus, new LoadedApp(Wireless.GPM));
-            check(FocusGuard.btAudioCalls == 1 && FocusGuard.gpmCalls == 1,
-                    "projection_focus is on by default in Gen5W Suite for btaudio and GPM");
+            check(FocusGuard.btAudioCalls == 1 && FocusGuard.gpmCalls == 1 && ParkSession.gpmCalls == 1,
+                    "projection_focus & ParkSession are on by default in Gen5W Suite for btaudio and GPM");
             FocusGuard.reset();
+            ParkSession.reset();
             ModContext focusOff = new ModContext();
             focusOff.settings.put("tbt", false);
             focusOff.settings.put("usb_drives", false);
@@ -679,9 +719,10 @@ public final class FocusGuard {
             wireless.appLoaded(focusOff, new LoadedApp(FocusPolicy.PKG_BTAUDIO));
             wireless.appLoaded(focusOff, new LoadedApp(Wireless.GPM));
             wireless.appLoaded(focusOff, new LoadedApp(Wireless.DIPO));
-            check(FocusGuard.btAudioCalls == 0 && FocusGuard.gpmCalls == 0 && focusOff.cpStarts == 0,
-                    "projection_focus=false disables FocusGuard and leaves DiPO off when all DiPO parts are off");""",
-            "AaSupportTest FocusGuard assertions",
+            check(FocusGuard.btAudioCalls == 0 && FocusGuard.gpmCalls == 0 && ParkSession.gpmCalls == 0
+                    && ParkSession.dipoCalls == 0 && focusOff.cpStarts == 0,
+                    "projection_focus=false & bridge=false disables FocusGuard/ParkSession and leaves DiPO off when all DiPO parts are off");""",
+            "AaSupportTest FocusGuard+ParkSession assertions",
         )
 
 

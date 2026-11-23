@@ -186,6 +186,57 @@ public final class FocusPolicyTest {
                 resumePolicy.decideReclaim(true, false, 11, 1, false, "com.daudio.app.launcher", true, 111_000L)
                         == FocusPolicy.ACTION_NONE);
 
+        // 11. Quick-stop parked teardown & SoftAP+BT-ready wireless reconnect (ParkSessionPolicy, RAM-only)
+        String validAaResume = "{\"bootId\":\"" + bootA + "\",\"preMode\":116,\"btAddr\":\"aa:bb:cc:11:22:33\",\"resumedAtElapsedMs\":100000,\"expiresAtElapsedMs\":145000}";
+        check("normalizeBtMac normalizes lowercase MAC",
+                "AA:BB:CC:11:22:33".equals(FocusPolicy.normalizeBtMac("aa:bb:cc:11:22:33")));
+        check("normalizeBtMac rejects zero/malformed MAC",
+                "".equals(FocusPolicy.normalizeBtMac("00:00:00:00:00:00"))
+                        && "".equals(FocusPolicy.normalizeBtMac("not-a-mac")));
+        check("extractProjectionResumeMode returns MODE_ANDROID_AUTO (116)",
+                FocusPolicy.extractProjectionResumeMode(bootA, 108_000L, validAaResume) == FocusPolicy.MODE_ANDROID_AUTO);
+        check("extractProjectionResumeBtAddr returns normalized BT MAC",
+                "AA:BB:CC:11:22:33".equals(FocusPolicy.extractProjectionResumeBtAddr(bootA, 108_000L, validAaResume)));
+        check("extractProjectionResumeBtAddr returns empty on expired lease",
+                "".equals(FocusPolicy.extractProjectionResumeBtAddr(bootA, 150_000L, validAaResume)));
+
+        FocusPolicy.ParkSessionPolicy gpmPol = new FocusPolicy.ParkSessionPolicy();
+        gpmPol.onAaConnected("aa:bb:cc:11:22:33");
+        check("PARKED while wireless AA is up triggers ByeByeRequest(1)",
+                gpmPol.onParkOrShutdown(true));
+        gpmPol.onAaDisconnected("");
+        check("AA reconnect waits while Home Wi-Fi / parked lease holds wlan0",
+                "".equals(gpmPol.selectAaReconnectTarget(13, 12, true, 0, "", "", 110_000L)));
+        check("AA reconnect waits while SoftAP is still enabling (12) or BT is off (10)",
+                "".equals(gpmPol.selectAaReconnectTarget(12, 12, false, 0, "", "", 110_500L))
+                        && "".equals(gpmPol.selectAaReconnectTarget(13, 10, false, 0, "", "", 110_500L)));
+        check("AA reconnect fires once SoftAP=13 and BT=12 with no parked lease",
+                "AA:BB:CC:11:22:33".equals(gpmPol.selectAaReconnectTarget(13, 12, false, 0, "", "", 112_000L)));
+        check("AA reconnect enforces cooldown and max 2 attempts when phone is away",
+                "".equals(gpmPol.selectAaReconnectTarget(13, 12, false, 0, "", "", 114_000L))
+                        && "AA:BB:CC:11:22:33".equals(gpmPol.selectAaReconnectTarget(13, 12, false, 0, "", "", 118_000L))
+                        && "".equals(gpmPol.selectAaReconnectTarget(13, 12, false, 0, "", "", 125_000L)));
+        // Switching to a second phone mid-boot updates RAM-only lastAaPhone without lock-out
+        gpmPol.onAaConnected("dd:ee:ff:44:55:66");
+        gpmPol.onParkOrShutdown(true);
+        gpmPol.onAaDisconnected("dd:ee:ff:44:55:66");
+        check("Unrelated third phone ACL connect is not hijacked",
+                "".equals(gpmPol.selectAaReconnectTarget(13, 12, false, 0, "", "99:88:77:66:55:44", 140_000L)));
+        check("Second phone ACL connect triggers immediate AA reconnect without persistent lock-out",
+                "DD:EE:FF:44:55:66".equals(gpmPol.selectAaReconnectTarget(13, 12, false, 0, "", "dd:ee:ff:44:55:66", 141_000L)));
+
+        FocusPolicy.ParkSessionPolicy dipoPol = new FocusPolicy.ParkSessionPolicy();
+        dipoPol.onCpStarted(1);
+        check("PARKED while wireless CarPlay is up triggers disconnectCarPlay()",
+                dipoPol.onParkOrShutdown(false));
+        dipoPol.onCpFinalized();
+        check("CarPlay restartBonjour waits until SoftAP=13 & BT=12 & no Home Wi-Fi hold",
+                !dipoPol.shouldRestartCarPlayBonjour(11, 12, false, 0, 150_000L)
+                        && !dipoPol.shouldRestartCarPlayBonjour(13, 12, true, 0, 150_500L));
+        check("CarPlay restartBonjour fires once when SoftAP=13 & BT=12 are ready",
+                dipoPol.shouldRestartCarPlayBonjour(13, 12, false, 0, 152_000L)
+                        && !dipoPol.shouldRestartCarPlayBonjour(13, 12, false, 0, 165_000L));
+
         System.out.println("ok    FocusPolicy: " + passed + " checks (no car access)");
     }
 }

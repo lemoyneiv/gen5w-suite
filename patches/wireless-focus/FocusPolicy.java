@@ -278,11 +278,65 @@ public final class FocusPolicy {
 
     public static final long LEASE_FRESHNESS_MS = 30_000L;
     public static final long PROJECTION_RESUME_LEASE_MS = 45_000L;
+    public static final int WIFI_AP_STATE_ENABLED = 13;
+    public static final int BT_STATE_ON = 12;
+
+    public static String normalizeBtMac(String addr) {
+        if (addr == null) return "";
+        String s = addr.trim().toUpperCase(java.util.Locale.US);
+        if (s.length() != 17 || "00:00:00:00:00:00".equals(s)) return "";
+        for (int i = 0; i < 17; i++) {
+            char c = s.charAt(i);
+            if (i % 3 == 2) {
+                if (c != ':') return "";
+            } else {
+                boolean hex = (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F');
+                if (!hex) return "";
+            }
+        }
+        return s;
+    }
 
     public static boolean isStandbyProjectionResumeActiveOnDevice(long nowElapsedMs) {
         String curBoot = readSmallUtf8(new java.io.File("/proc/sys/kernel/random/boot_id")).trim();
         String resumeJson = readSmallUtf8(new java.io.File("/data/hmgapi/public/projection-resume.json"));
         return isStandbyProjectionResumeActive(curBoot, nowElapsedMs, resumeJson);
+    }
+
+    public static int extractProjectionResumeModeOnDevice(long nowElapsedMs) {
+        String curBoot = readSmallUtf8(new java.io.File("/proc/sys/kernel/random/boot_id")).trim();
+        String resumeJson = readSmallUtf8(new java.io.File("/data/hmgapi/public/projection-resume.json"));
+        return extractProjectionResumeMode(curBoot, nowElapsedMs, resumeJson);
+    }
+
+    public static String extractProjectionResumeBtAddrOnDevice(long nowElapsedMs) {
+        String curBoot = readSmallUtf8(new java.io.File("/proc/sys/kernel/random/boot_id")).trim();
+        String resumeJson = readSmallUtf8(new java.io.File("/data/hmgapi/public/projection-resume.json"));
+        return extractProjectionResumeBtAddr(curBoot, nowElapsedMs, resumeJson);
+    }
+
+    public static int extractProjectionResumeMode(
+            String curBootId,
+            long nowElapsedMs,
+            String resumeJson) {
+        if (!isStandbyProjectionResumeActive(curBootId, nowElapsedMs, resumeJson)) {
+            return MODE_NONE;
+        }
+        long preMode = extractJsonLong(resumeJson, "preMode", -1L);
+        if (preMode == MODE_CARPLAY || preMode == MODE_ANDROID_AUTO) {
+            return (int) preMode;
+        }
+        return MODE_NONE;
+    }
+
+    public static String extractProjectionResumeBtAddr(
+            String curBootId,
+            long nowElapsedMs,
+            String resumeJson) {
+        if (!isStandbyProjectionResumeActive(curBootId, nowElapsedMs, resumeJson)) {
+            return "";
+        }
+        return normalizeBtMac(extractJsonString(resumeJson, "btAddr"));
     }
 
     public static boolean isStandbyProjectionResumeActive(
@@ -308,6 +362,157 @@ public final class FocusPolicy {
             return false;
         }
         return true;
+    }
+
+    /**
+     * Per-boot RAM-only parked teardown and post-quick-stop wireless reconnect state
+     * machine. Never persists phone addresses to Settings.Global or disk so switching
+     * phones across trips or drivers is never locked out.
+     */
+    public static final class ParkSessionPolicy {
+        public static final long BONJOUR_COOLDOWN_MS = 8_000L;
+        public static final long AA_CONNECT_COOLDOWN_MS = 4_500L;
+        public static final int MAX_AA_RETRIES = 2;
+
+        private String lastAaPhone = "";
+        private boolean aaUp;
+        private boolean cpUp;
+        private boolean hadWirelessCpThisBoot;
+        private boolean parkedCycle;
+        private boolean needsBonjourRestart;
+        private long lastBonjourRestartAtMs;
+        private long lastAaConnectAtMs;
+        private int aaRetryCount;
+
+        public synchronized void noteAaPhone(String addr) {
+            String m = normalizeBtMac(addr);
+            if (!m.isEmpty()) {
+                lastAaPhone = m;
+            }
+        }
+
+        public synchronized String lastAaPhone() {
+            return lastAaPhone;
+        }
+
+        public synchronized void onAaConnected(String wirelessExplorerAddr) {
+            noteAaPhone(wirelessExplorerAddr);
+            aaUp = true;
+            parkedCycle = false;
+            aaRetryCount = 0;
+        }
+
+        public synchronized void onAaDisconnected(String wirelessExplorerAddr) {
+            noteAaPhone(wirelessExplorerAddr);
+            aaUp = false;
+        }
+
+        public synchronized void onCpStarted(int transport) {
+            cpUp = true;
+            parkedCycle = false;
+            needsBonjourRestart = false;
+            if (transport == 1) {
+                hadWirelessCpThisBoot = true;
+            }
+        }
+
+        public synchronized void onCpFinalized() {
+            cpUp = false;
+        }
+
+        /**
+         * @param isGpm true in HKMC_GPM (returns true when ByeByeRequest(1) should be sent),
+         *              false in HKMC_DiPO (returns true when disconnectCarPlay() should be called)
+         */
+        public synchronized boolean onParkOrShutdown(boolean isGpm) {
+            parkedCycle = true;
+            aaRetryCount = 0;
+            if (isGpm) {
+                return aaUp;
+            }
+            if (cpUp) {
+                needsBonjourRestart = true;
+                return true;
+            }
+            return false;
+        }
+
+        public synchronized void onWakeOrUnpark() {
+            parkedCycle = true;
+            aaRetryCount = 0;
+        }
+
+        public synchronized boolean shouldRestartCarPlayBonjour(
+                int apState,
+                int btState,
+                boolean homeOrParkedHold,
+                int resumeMode,
+                long nowMs) {
+            if (cpUp || aaUp || homeOrParkedHold) return false;
+            if (apState != WIFI_AP_STATE_ENABLED || btState != BT_STATE_ON) return false;
+            boolean needed = needsBonjourRestart
+                    || (parkedCycle && hadWirelessCpThisBoot)
+                    || resumeMode == MODE_CARPLAY;
+            if (!needed) return false;
+            if (lastBonjourRestartAtMs > 0L && nowMs - lastBonjourRestartAtMs < BONJOUR_COOLDOWN_MS) {
+                return false;
+            }
+            needsBonjourRestart = false;
+            parkedCycle = false;
+            lastBonjourRestartAtMs = Math.max(1L, nowMs);
+            return true;
+        }
+
+        public synchronized String selectAaReconnectTarget(
+                int apState,
+                int btState,
+                boolean homeOrParkedHold,
+                int resumeMode,
+                String resumeBtAddr,
+                String aclConnectedAddr,
+                long nowMs) {
+            if (aaUp || cpUp || homeOrParkedHold) return "";
+            if (apState != WIFI_AP_STATE_ENABLED || btState != BT_STATE_ON) return "";
+
+            String candidate = "";
+            if (!lastAaPhone.isEmpty()) {
+                candidate = lastAaPhone;
+            } else if (resumeMode == MODE_ANDROID_AUTO) {
+                candidate = normalizeBtMac(resumeBtAddr);
+            }
+            if (candidate.isEmpty()) return "";
+
+            if (aclConnectedAddr != null && !aclConnectedAddr.isEmpty()) {
+                String acl = normalizeBtMac(aclConnectedAddr);
+                if (acl.isEmpty() || !acl.equals(candidate)) {
+                    return "";
+                }
+                if (lastAaConnectAtMs > 0L && nowMs - lastAaConnectAtMs < AA_CONNECT_COOLDOWN_MS) {
+                    return "";
+                }
+                lastAaConnectAtMs = Math.max(1L, nowMs);
+                parkedCycle = false;
+                aaRetryCount = 0;
+                return candidate;
+            }
+
+            if (!parkedCycle && resumeMode != MODE_ANDROID_AUTO) {
+                return "";
+            }
+            if (aaRetryCount >= MAX_AA_RETRIES) {
+                parkedCycle = false;
+                return "";
+            }
+            if (lastAaConnectAtMs > 0L && nowMs - lastAaConnectAtMs < AA_CONNECT_COOLDOWN_MS) {
+                return "";
+            }
+            aaRetryCount++;
+            if (aaRetryCount >= MAX_AA_RETRIES) {
+                parkedCycle = false;
+            }
+            lastAaConnectAtMs = Math.max(1L, nowMs);
+            return candidate;
+        }
     }
 
     public static boolean isHomeWifiOrParkedLeaseActiveOnDevice(long nowElapsedMs, String wpaSupplicantProp) {

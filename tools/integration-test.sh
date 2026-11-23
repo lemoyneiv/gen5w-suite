@@ -139,7 +139,7 @@ do
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
     check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
-    check "$P: wireless-carplay-aa version 2.2.5" "2.2.5" \
+    check "$P: wireless-carplay-aa version 2.2.6" "2.2.6" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
@@ -162,6 +162,7 @@ do
     eng apply
     check "$P: single atomic apply succeeds" 0 "$rc"
     has "$P: wireless-carplay-aa hooks NavigationCluster trap-frame points" "framework.navigation_cluster.update_tbt_trap_info_new" "$(cat "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
+    has "$P: wireless-carplay-aa car_events published in state/events.txt" "wireless-carplay-aa parked" "$(cat "$R/data/hmgapi/state/events.txt")"
     has "$P: audio converter added" "/system/lib/libleafiaaac.so" "$out"
     has "$P: CarPlay identity serializer added" "/system/lib/libcarplayidentity.so" "$out"
     has "$P: CarPlay log switch added" "/system/lib/libcarplaylog.so" "$out"
