@@ -278,6 +278,20 @@ public final class FocusPolicyTest {
                 dipoPol.shouldRestartCarPlayBonjour(13, 12, false, 0, 152_000L)
                         && !dipoPol.shouldRestartCarPlayBonjour(13, 12, false, 0, 165_000L));
 
+        // 12. Active Bluetooth HFP / phone call defers GPM_CUSTOM_SHORTCUT / DIPO_CUSTOM_SHORTCUT reclaim
+        //     so Gen5W never displays "Feature is unavailable during a call."
+        FocusPolicy callPol = new FocusPolicy();
+        callPol.onProjectionEvent(FocusPolicy.SOURCE_ANDROID_AUTO, "connected", 10_000L);
+        check("Active HFP call (phoneCallActive=true) defers GPM_CUSTOM_SHORTCUT reclaim",
+                callPol.decideReclaim(false, true, FocusPolicy.MODE_NONE, 0, false, "com.android.launcher3", false, true, 10_500L)
+                        == FocusPolicy.ACTION_DEFER_CAMERA);
+        check("InCallUI top package also defers GPM_CUSTOM_SHORTCUT reclaim",
+                callPol.decideReclaim(false, true, FocusPolicy.MODE_NONE, 0, false, "com.android.incallui", false, false, 12_000L)
+                        == FocusPolicy.ACTION_DEFER_CAMERA);
+        check("Once call ends, deferred Android Auto startup reclaim fires cleanly once",
+                callPol.decideReclaim(false, true, FocusPolicy.MODE_NONE, 0, false, "com.android.launcher3", false, false, 20_000L)
+                        == FocusPolicy.ACTION_RECLAIM_ANDROID_AUTO);
+
         System.out.println("ok    FocusPolicy: " + passed + " checks (no car access)");
     }
 }

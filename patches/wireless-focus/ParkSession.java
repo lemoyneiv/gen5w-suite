@@ -308,9 +308,13 @@ public final class ParkSession {
             final ModContext mod,
             final ClassLoader cl,
             final Context ctx,
-            String aclAddrOrNull) {
+            final String aclAddrOrNull) {
         if (!mod.enabled() || sGalService == null || ctx == null) return;
         if (!connectedWirelessAddr(cl).isEmpty() || FocusGuard.isAndroidAutoConnected(ctx) || FocusGuard.isCarPlayConnected(ctx)) {
+            return;
+        }
+        if (FocusGuard.isPhoneCallActive(ctx)) {
+            scheduleGpmCheck(mod, cl, ctx, 4000L, aclAddrOrNull);
             return;
         }
         long now = SystemClock.elapsedRealtime();
@@ -337,6 +341,10 @@ public final class ParkSession {
                 if (!connectedWirelessAddr(cl).isEmpty()
                         || FocusGuard.isAndroidAutoConnected(ctx)
                         || FocusGuard.isCarPlayConnected(ctx)) {
+                    return;
+                }
+                if (FocusGuard.isPhoneCallActive(ctx)) {
+                    scheduleGpmCheck(mod, cl, ctx, 4000L, target);
                     return;
                 }
                 long t = SystemClock.elapsedRealtime();

@@ -403,10 +403,11 @@ public final class FocusGuard {
                 int mode = currentMode(context);
                 int audio = micomAudioMode(context);
                 boolean pgsCam = isPgsCameraActive();
+                boolean inCall = isPhoneCallActive(context);
                 String top = topPackage(context);
                 long t = now();
                 boolean standbyResume = FocusPolicy.isStandbyProjectionResumeActiveOnDevice(t);
-                int action = POLICY.decideReclaim(cp, aa, mode, audio, pgsCam, top, standbyResume, t);
+                int action = POLICY.decideReclaim(cp, aa, mode, audio, pgsCam, top, standbyResume, inCall, t);
                 if (action == FocusPolicy.ACTION_DEFER_CAMERA) {
                     if (attempt < MAX_CAMERA_RETRIES) {
                         scheduleReclaim(mod, context, 1000L, attempt + 1);
@@ -432,7 +433,7 @@ public final class FocusGuard {
      * In-process backup reclaim inside DiPO / GPM for post-Dark-Standby Projection
      * resume OR cold-boot idle-Launcher connect (when HKMC_BtAudio had not yet spawned
      * to receive PROJECTION_FOCUS). No-ops if Projection is already foreground, defers
-     * while any camera is active, and fires at most once.
+     * while any camera or phone/HFP call is active, and fires at most once.
      */
     static void scheduleLocalStandbyResumeReclaim(final ModContext mod, final Context context,
                                                   final int source, long delayMs, final int attempt) {
@@ -448,7 +449,9 @@ public final class FocusGuard {
                 int mode = currentMode(context);
                 if (mode == FocusPolicy.MODE_CARPLAY || mode == FocusPolicy.MODE_ANDROID_AUTO) return;
                 String top = topPackage(context);
-                if (FocusPolicy.isCameraActive(isPgsCameraActive(), top)) {
+                if (FocusPolicy.isCameraActive(isPgsCameraActive(), top)
+                        || isPhoneCallActive(context)
+                        || FocusPolicy.isPhoneCallTop(top)) {
                     if (attempt < MAX_CAMERA_RETRIES) {
                         scheduleLocalStandbyResumeReclaim(mod, context, source, 1000L, attempt + 1);
                     }
@@ -472,6 +475,41 @@ public final class FocusGuard {
             }
         };
         mainHandler().postAtTime(r, RECLAIM_TOKEN, SystemClock.uptimeMillis() + Math.max(0L, delayMs));
+    }
+
+    static boolean isPhoneCallActive(Context c) {
+        Object pp = getPpManager();
+        if (pp != null) {
+            if (invokePpBoolean(pp, "isBtCalling") || invokePpBoolean(pp, "isBtIncomingCall")) {
+                return true;
+            }
+        }
+        if (c != null) {
+            try {
+                AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+                if (am != null) {
+                    int m = am.getMode();
+                    if (m == AudioManager.MODE_IN_CALL
+                            || m == AudioManager.MODE_RINGTONE
+                            || m == AudioManager.MODE_IN_COMMUNICATION) {
+                        return true;
+                    }
+                }
+            } catch (Throwable ignored) {}
+            if (Points.has("framework.gpm_manager.new") && Points.has("framework.gpm_manager.is_call")) {
+                try {
+                    Object gpm = sGpmManager;
+                    if (gpm == null && !sGpmManagerTried) {
+                        sGpmManagerTried = true;
+                        gpm = sGpmManager = Points.newInstance(null, "framework.gpm_manager.new", appContext(c));
+                    }
+                    if (gpm != null && Boolean.TRUE.equals(Points.call(null, "framework.gpm_manager.is_call", gpm))) {
+                        return true;
+                    }
+                } catch (Throwable ignored) {}
+            }
+        }
+        return false;
     }
 
     static boolean syncAndCheckOtherPhoneBt(Context c, long nowMs) {

@@ -317,6 +317,11 @@ public final class FocusPolicy {
         return (cpConnected || aaConnected) && !otherPhoneBtActive;
     }
 
+    public static boolean isPhoneCallTop(String topPackage) {
+        return "com.android.incallui".equals(topPackage)
+                || "com.hkmc.bluetooth".equals(topPackage);
+    }
+
     /**
      * Evaluates whether a newly connected projection session should reclaim focus
      * from Bluetooth Audio or an idle cold-boot Launcher screen once during startup.
@@ -325,7 +330,7 @@ public final class FocusPolicy {
                                           int currentMode, int micomAudioMode,
                                           boolean pgsCameraActive, String topPackage,
                                           long nowMs) {
-        return decideReclaim(liveCp, liveAa, currentMode, micomAudioMode, pgsCameraActive, topPackage, false, nowMs);
+        return decideReclaim(liveCp, liveAa, currentMode, micomAudioMode, pgsCameraActive, topPackage, false, false, nowMs);
     }
 
     /**
@@ -339,6 +344,15 @@ public final class FocusPolicy {
                                           boolean pgsCameraActive, String topPackage,
                                           boolean standbyProjectionResume,
                                           long nowMs) {
+        return decideReclaim(liveCp, liveAa, currentMode, micomAudioMode, pgsCameraActive, topPackage, standbyProjectionResume, false, nowMs);
+    }
+
+    public synchronized int decideReclaim(boolean liveCp, boolean liveAa,
+                                          int currentMode, int micomAudioMode,
+                                          boolean pgsCameraActive, String topPackage,
+                                          boolean standbyProjectionResume,
+                                          boolean phoneCallActive,
+                                          long nowMs) {
         observeMode(currentMode, nowMs);
         long deadline = cameraDeferring ? connectStartedAt + MAX_CAMERA_DEFER_MS : connectWindowUntil;
         if (!reclaimPending || activeSource == SOURCE_NONE || nowMs >= deadline || btUserSelected) {
@@ -350,7 +364,7 @@ public final class FocusPolicy {
                 || (activeSource == SOURCE_ANDROID_AUTO && liveAa);
         if (!live) return ACTION_NONE;
 
-        if (isCameraActive(pgsCameraActive, topPackage)) {
+        if (isCameraActive(pgsCameraActive, topPackage) || phoneCallActive || isPhoneCallTop(topPackage)) {
             cameraDeferring = true;
             return ACTION_DEFER_CAMERA;
         }
