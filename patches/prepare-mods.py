@@ -841,12 +841,17 @@ def patch_light_vibes(repo: Path) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--work-dir", required=True, help="Directory containing working copies of upstream mod repos")
+    ap.add_argument("--hmgapi", default=str(PATCH_DIR.parent.parent / "HMG-API"), help="Path to HMG-API checkout")
     args = ap.parse_args()
     w = Path(args.work_dir).resolve()
+    hmgapi_dir = Path(args.hmgapi).resolve()
 
     patch_wireless(w / "hmgapi-wireless-cp-aa")
     patch_aa_dpi(w / "hmg-aa-dpi")
     patch_light_vibes(w / "light-vibes")
+    if (w / "Gen5W-EQ-Engine").exists():
+        from prepare_eq_engine import prepare_eq_engine
+        prepare_eq_engine(w / "Gen5W-EQ-Engine", hmgapi_dir)
     print("All patched mods prepared cleanly.")
     return 0
 

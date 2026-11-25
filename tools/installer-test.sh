@@ -50,11 +50,17 @@ mkdir -p "$R/data/nemesis/apps" \
          "$USB/packages" \
          "$USB/HMGAPI/updates"
 
-# Populate legacy NEMESIS packages that MUST be uninstalled
-for p in wireless.carplay.aa carplay.wifi.audio leafia.custom evergreen.tweaks aa.dpi wireless.projection enhanced.projection; do
+# Populate legacy NEMESIS packages that MUST be uninstalled (including standalone eqengine)
+for p in wireless.carplay.aa carplay.wifi.audio leafia.custom evergreen.tweaks aa.dpi wireless.projection enhanced.projection eqengine; do
     mkdir -p "$R/data/nemesis/apps/$p"
     printf '[nemesis]\nid=%s\nname=Test %s\n' "$p" "$p" > "$R/data/nemesis/apps/$p/NEMESIS.data"
 done
+
+# Populate standalone eqengine user presets & converter choice that MUST survive eqengine uninstall
+mkdir -p "$R/data/eqengine/settings"
+printf 'mode=easy\npreamp=-15\nbands=30,10,-15,15,35\ncp_eq=1\n' > "$R/data/eqengine/settings/current.txt"
+printf 'name=Ioniq5 Bass\nmode=easy\npreamp=-20\nbands=45,15,-10,10,30\n' > "$R/data/eqengine/settings/preset1.txt"
+printf '4\n' > "$R/data/eqengine/settings/converter"
 
 # A package with a neutral ID whose NEMESIS.data name mentions Evergreen
 mkdir -p "$R/data/nemesis/apps/old.projection.helper"
@@ -98,7 +104,7 @@ printf '{"uuid": "839375d3-8aea-884a-a9e9-c79964fe5d88"}\n' > "$R/data/hmgapi/mo
 
 # Stub USB files and head-unit binaries (nemesis, hmgapid, getprop, pm, am, reboot, sync)
 : > "$USB/packages/hmgapi.zip"
-for m in 01-wireless-carplay-aa 02-adb 03-aa-dpi 04-egmp-aa-ev 05-hmgapi-comfort 06-light-vibes; do
+for m in 01-wireless-carplay-aa 02-adb 03-aa-dpi 04-egmp-aa-ev 05-hmgapi-comfort 06-light-vibes 07-eq-engine; do
     : > "$USB/HMGAPI/updates/$m.hmgapi.zip"
 done
 
@@ -112,6 +118,8 @@ if [ "\$1" = "uninstall" ]; then
     shift
     [ "\$1" = "--force" ] && shift
     rm -rf "$R/data/nemesis/apps/\$1"
+    # Standalone eqengine postun.sh deletes /data/eqengine on uninstall: simulate that wipe!
+    [ "\$1" = "eqengine" ] && rm -rf "$R/data/eqengine"
 fi
 exit 0
 EOF
@@ -136,7 +144,7 @@ cat > "$BIN/pm" <<EOF
 #!/bin/sh
 if [ "\$1" = "path" ]; then
     case "\$2" in
-        leafia.app|evergreen.app) echo "package:/data/app/\$2-1.apk" ;;
+        leafia.app|evergreen.app|com.eqengine.app) echo "package:/data/app/\$2-1.apk" ;;
     esac
 elif [ "\$1" = "uninstall" ]; then
     echo "pm-uninstall \$2" >> "$T/events.log"
@@ -151,16 +159,17 @@ exit 0
 EOF
 chmod 755 "$BIN/getprop" "$BIN/setprop" "$BIN/pm" "$BIN/am"
 
-mkdir -p "$R/data/hmgapi/public" "$R/data/hmgapi/hook"
+mkdir -p "$R/data/hmgapi/public" "$R/data/hmgapi/hook" "$R/dev"
 : > "$R/data/hmgapi/HmgApi.apk"
 : > "$R/data/hmgapi/public/HmgApi.apk"
 echo 4 > "$R/data/hmgapi/hook/starts"
 : > "$R/data/hmgapi/hook/disable"
 
-# Rewrite absolute /data and /system paths in a test copy of usb/NEMESIS.sh to point into $R
+# Rewrite absolute /data, /system, and /dev/eqengine paths in a test copy of usb/NEMESIS.sh to point into $R
 sed -e "s|^export PATH=.*|export PATH=$BIN:/usr/bin:/bin|" \
     -e "s|/data/|$R/data/|g" \
     -e "s|/system/|$R/system/|g" \
+    -e "s|/dev/eqengine|$R/dev/eqengine|g" \
     "$HERE/usb/NEMESIS.sh" > "$USB/NEMESIS.sh"
 chmod 755 "$USB/NEMESIS.sh"
 
@@ -173,6 +182,8 @@ has "uninstalled leafia.custom by id" "nemesis uninstall leafia.custom" "$EVENTS
 has "uninstalled evergreen.tweaks by id" "nemesis uninstall evergreen.tweaks" "$EVENTS"
 has "uninstalled old.projection.helper by Evergreen name" "nemesis uninstall old.projection.helper" "$EVENTS"
 has "uninstalled enhanced.projection" "nemesis uninstall enhanced.projection" "$EVENTS"
+has "uninstalled standalone eqengine NEMESIS package" "nemesis uninstall eqengine" "$EVENTS"
+has "uninstalled orphaned standalone com.eqengine.app APK" "pm-uninstall com.eqengine.app" "$EVENTS"
 hasnt "did NOT uninstall hmgapi core" "nemesis uninstall hmgapi " "$EVENTS"
 hasnt "did NOT uninstall hmgapi.wireless-carplay-aa" "nemesis uninstall hmgapi.wireless-carplay-aa" "$EVENTS"
 hasnt "did NOT uninstall unrelated.utility" "nemesis uninstall unrelated.utility" "$EVENTS"
@@ -193,6 +204,17 @@ has "migrated old suite-signed adb to official VysseCodes UUID" "hmgapid engine 
 hasnt "kept already-matching AwsomeFox egmp-aa-ev without remove" "hmgapid engine remove egmp-aa-ev" "$EVENTS"
 has "ensured block_ambient_light is off" "hmgapid allow block_ambient_light off" "$EVENTS"
 has "installed 06-light-vibes.hmgapi.zip" "06-light-vibes.hmgapi.zip" "$EVENTS"
+has "installed 07-eq-engine.hmgapi.zip" "07-eq-engine.hmgapi.zip" "$EVENTS"
+
+has "restored EQ Engine current.txt across standalone eqengine wipe" \
+    "bands=30,10,-15,15,35" \
+    "$(cat "$R/data/eqengine/settings/current.txt")"
+has "restored EQ Engine preset1.txt across standalone eqengine wipe" \
+    "name=Ioniq5 Bass" \
+    "$(cat "$R/data/eqengine/settings/preset1.txt")"
+check "restored EQ Engine converter choice across standalone eqengine wipe" \
+    "4" \
+    "$(cat "$R/data/eqengine/settings/converter")"
 
 check "seeded adb.json has usb=false" \
     '{"usb": false}' \
@@ -220,7 +242,7 @@ check "owner mobile-data opt-out preserved across subsequent suite installs" \
     '{"updates": false}' \
     "$(cat "$R/data/hmgapi/settings/hmgapi.json")"
 
-# Simulate HMGAPI/RESET_SETTINGS on USB re-seeding hmgapi-openlink
+# Simulate HMGAPI/RESET_SETTINGS on USB re-seeding hmgapi-openlink and clearing eqengine settings
 : > "$USB/HMGAPI/RESET_SETTINGS"
 sh "$USB/NEMESIS.sh" >/dev/null
 RESET_PARSED=$(python3 - "$R/data/hmgapi/settings/hmgapi.json" <<'PY'
@@ -232,5 +254,8 @@ PY
 check "RESET_SETTINGS re-seeds hmgapi-openlink into overrides.allow_cellular" \
     "['hmgapi-openlink']" \
     "$RESET_PARSED"
+check "RESET_SETTINGS cleared EQ Engine migrated preset1.txt" \
+    "no" \
+    "$([ -f "$R/data/eqengine/settings/preset1.txt" ] && echo yes || echo no)"
 
 exit "$fail"

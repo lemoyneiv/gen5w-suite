@@ -2,12 +2,13 @@
 # Gen5W Suite Unified One-Tap Installer (executed by NEMESIS USB Handler as root).
 #
 # 1. Uninstalls legacy/competing standalone NEMESIS packages if installed.
-# 2. Installs or updates HMG-API Core 1.1.1-rc.22 (Home Wi-Fi + BLE + VehicleHub + QuickBoot).
+# 2. Installs or updates HMG-API Core 1.1.1-rc.23 (Home Wi-Fi + BLE + VehicleHub + QuickBoot + FastStart).
 # 3. Verifies/enables the car's hook map (260507 + 260903) and pre-grants
 #    owner permissions for comfort and EV preconditioning commands.
 # 4. Installs all signed suite mods (preserving existing user settings across
-#    author-key migrations), seeds hmgapi-openlink into overrides.allow_cellular,
-#    and runs a single atomic `hmgapid engine apply`.
+#    author-key migrations and migrating standalone eqengine presets), seeds
+#    hmgapi-openlink into overrides.allow_cellular, and runs a single atomic
+#    `hmgapid engine apply`.
 # 5. Syncs mod APKs and NEMESIS Manager package listings, then prompts for one
 #    head-unit restart.
 
@@ -28,6 +29,7 @@ LOG=/data/hmgapi/suite-install.log
 echo "=== Gen5W Suite install $(date) from $USB ===" > "$LOG"
 
 SUITE_UUID="28ad71e0-07c0-8e61-8bf3-380cc71f9280"
+SUITE_V2_UUID="5aa22839-7070-8177-9660-14941b7463c5"
 
 msg() {
     echo "$1"
@@ -64,6 +66,18 @@ NEMESIS=/system/xbin/nemesis
 
 toast "Gen5W Suite: installing HMG-API + mods (please wait ~30s)..."
 
+# Preserve standalone NEMESIS eqengine presets & converter settings before uninstalling eqengine
+rm -rf /data/hmgapi/eqengine-migrate
+if [ -d /data/eqengine/settings ] && [ ! -f "$USB/HMGAPI/RESET_SETTINGS" ]; then
+    mkdir -p /data/hmgapi/eqengine-migrate
+    chmod 700 /data/hmgapi/eqengine-migrate
+    for eqf in /data/eqengine/settings/*; do
+        [ -f "$eqf" ] || continue
+        cp "$eqf" "/data/hmgapi/eqengine-migrate/${eqf##*/}"
+    done
+    msg "Backed up existing EQ Engine presets/settings to /data/hmgapi/eqengine-migrate"
+fi
+
 # 1. Remove legacy/competing standalone NEMESIS packages + Leafia/Evergreen precursors cleanly
 uninstall_nemesis_pkg() {
     local pkg=$1 out
@@ -88,6 +102,7 @@ for pkg in \
     voicehandler.vr-gates \
     adb.tcp \
     light.vibes \
+    eqengine \
     ambient.sound \
     gen5w.ambient.sound
 do
@@ -139,10 +154,17 @@ if [ "$(getprop sys.boot_completed)" = 1 ]; then
                 pm uninstall "$legacy_apk" >> "$LOG" 2>&1 ;;
         esac
     done
+    if [ ! -d /data/hmgapi/mods/eq-engine ]; then
+        case "$(pm path com.eqengine.app 2>/dev/null)" in
+            package:*)
+                msg "Removing standalone com.eqengine.app APK so HMG-API ModApps can manage it"
+                pm uninstall com.eqengine.app >> "$LOG" 2>&1 ;;
+        esac
+    fi
 fi
 rm -rf /data/local/coldstart-heat /data/leafia /data/evergreen >/dev/null 2>&1
 
-# 2. Install or update HMG-API Core 1.1.1-rc.22 via NEMESIS
+# 2. Install or update HMG-API Core 1.1.1-rc.23 via NEMESIS
 if [ -f /data/nemesis/apps/hmgapi/NEMESIS.data ]; then
     msg "Updating HMG-API Core from packages/hmgapi.zip"
     out=$("$NEMESIS" install --update --force --accept-risk "$USB/packages/hmgapi.zip" 2>&1) || fail_install "HMG-API update failed: $out"
@@ -232,7 +254,9 @@ if [ -f "$USB/HMGAPI/RESET_SETTINGS" ]; then
           /data/hmgapi/settings/egmp-aa-ev.json \
           /data/hmgapi/settings/hmgapi-comfort.json \
           /data/hmgapi/settings/light-vibes.json \
+          /data/hmgapi/settings/eq-engine.json \
           /data/hmgapi/settings/.openlink_cellular_seeded
+    rm -rf /data/hmgapi/eqengine-migrate /data/eqengine/settings
 elif [ -f /data/hmgapi/mods/aa-dpi/mod.json ] && grep -q '"0\.2\.' /data/hmgapi/mods/aa-dpi/mod.json 2>/dev/null; then
     msg "Upgrading aa-dpi from 0.2.x -> 0.3.0: applying DPI 200, tap_limit=false, 60fps window"
     echo '{"dpi": 200, "real_dpi": "same", "tap_limit": false, "video_window": 6}' > /data/hmgapi/settings/aa-dpi.json
@@ -282,6 +306,7 @@ install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
 install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"          "$EGMP_UUID"
 install_suite_mod hmgapi-comfort      "$USB/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"      "$SUITE_UUID"
 install_suite_mod light-vibes         "$USB/HMGAPI/updates/06-light-vibes.hmgapi.zip"         "$SUITE_UUID"
+install_suite_mod eq-engine           "$USB/HMGAPI/updates/07-eq-engine.hmgapi.zip"           "$SUITE_V2_UUID"
 
 # Seed hmgapi-openlink into hmgapi.json overrides.allow_cellular once (toggleable anytime in Settings > Home Wi-Fi > Mobile data)
 if [ ! -f /data/hmgapi/settings/.openlink_cellular_seeded ]; then
@@ -340,6 +365,35 @@ if [ "$(getprop sys.boot_completed)" = 1 ]; then
     msg "Syncing mod companion APKs"
     out=$("$HMGAPID" engine apps 2>&1) || msg "note: engine apps: $out"
     msg "$out"
+fi
+
+# Restore any migrated EQ Engine presets/settings and set com.eqengine.app ownership
+mkdir -p /data/eqengine/settings /data/eqengine/state
+mkdir -p /dev/eqengine/cpw /dev/eqengine/share 2>/dev/null
+chmod 755 /data/eqengine /data/eqengine/state 2>/dev/null
+chmod 755 /dev/eqengine /dev/eqengine/cpw /dev/eqengine/share 2>/dev/null
+if [ -d /data/hmgapi/eqengine-migrate ]; then
+    for eqf in /data/hmgapi/eqengine-migrate/*; do
+        [ -f "$eqf" ] || continue
+        cp "$eqf" "/data/eqengine/settings/${eqf##*/}"
+    done
+    rm -rf /data/hmgapi/eqengine-migrate
+    msg "Restored migrated EQ Engine presets into /data/eqengine/settings"
+fi
+if [ -d /data/data/com.eqengine.app ]; then
+    set -- $(ls -ld /data/data/com.eqengine.app 2>/dev/null)
+    eq_owner=$2
+    case "$eq_owner" in
+        ''|*[!0-9]*) ;;
+        *) eq_owner=$3 ;;
+    esac
+    if [ -n "$eq_owner" ]; then
+        chown "$eq_owner:$eq_owner" /data/eqengine/settings /dev/eqengine/share 2>/dev/null
+        for eqf in /data/eqengine/settings/*; do
+            [ -f "$eqf" ] && chown "$eq_owner:$eq_owner" "$eqf" 2>/dev/null && chmod 600 "$eqf" 2>/dev/null
+        done
+        chmod 700 /data/eqengine/settings 2>/dev/null
+    fi
 fi
 
 msg "Syncing NEMESIS Manager package list"

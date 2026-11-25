@@ -8,3 +8,4 @@ hmgapi-comfort/dist/
 *.key
 *.key.pub
 .DS_Store
+__pycache__/

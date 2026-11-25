@@ -124,6 +124,9 @@ do
             04-egmp-aa-ev.hmgapi.zip)
                 has "$P: ${z##*/} signed by official AwsomeFox key" \
                     "author key 839375d3-8aea-884a-a9e9-c79964fe5d88" "$out" ;;
+            07-eq-engine.hmgapi.zip)
+                has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" \
+                    "author   lemoyneiv (author key 5aa22839-7070-8177-9660-14941b7463c5, on HMG-API's trusted author list)" "$out" ;;
             *)
                 has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" \
                     "author   lemoyneiv (author key 28ad71e0-07c0-8e61-8bf3-380cc71f9280, on HMG-API's trusted author list)" "$out" ;;
@@ -139,10 +142,13 @@ do
     check "$P: egmp-aa-ev stock authors preserved" "willemcvu, AwsomeFox" "$(mod_authors egmp-aa-ev)"
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
     check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
+    check "$P: eq-engine authors" "alexkozler, lemoyneiv" "$(mod_authors eq-engine)"
     check "$P: wireless-carplay-aa version 2.2.7" "2.2.7" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
+    check "$P: eq-engine version 0.7.7" "0.7.7" \
+        "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/eq-engine/mod.json")"
 
     # Plan across ALL mods simultaneously (verify pre-seeded hmgapi-openlink causes 0 warnings before OpenLink is installed)
     eng plan
@@ -178,9 +184,15 @@ do
     has "$P: hmgapi-comfort fast-path welcome boot service scheduled" "hmgapi-comfort welcome system boot yes jar app/Comfort.apk dev.lemoyne.comfort.WelcomeDaemon" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: hmgapi-comfort starter service scheduled" "hmgapi-comfort starter" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: light-vibes lights service scheduled" "light-vibes lights" "$(cat "$R/data/hmgapi/state/services.txt")"
+    has "$P: eq-engine early boot service scheduled" "eq-engine boot root boot yes script bin/boot.sh" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: Comfort.apk companion app scheduled" "dev.lemoyne.comfort hmgapi-comfort" "$(cat "$R/data/hmgapi/state/apps.txt")"
     has "$P: LightVibes.apk companion app scheduled" "lightvibes.app light-vibes" "$(cat "$R/data/hmgapi/state/apps.txt")"
+    has "$P: EQEngine.apk companion app scheduled" "com.eqengine.app eq-engine" "$(cat "$R/data/hmgapi/state/apps.txt")"
+    has "$P: eq-engine launcher tile declared & readable" '"icon": "icons/icon.png"' "$(cat "$R/data/hmgapi/mods/eq-engine/mod.json")"
+    check "$P: eq-engine launcher icon world-readable" "yes" "$(test -r "$R/data/hmgapi/mods/eq-engine/icons/icon.png" && echo yes || echo no)"
+    has "$P: eq-engine EQENGINE_CURVES USB folder registered" "eq-engine EQENGINE_CURVES" "$(cat "$R/data/hmgapi/state/usb.txt")"
     has "$P: suite mods kept off cellular by default" "block hmgapi-comfort" "$(cat "$R/data/hmgapi/state/mods-net.txt")"
+    has "$P: eq-engine kept off cellular by default" "block eq-engine" "$(cat "$R/data/hmgapi/state/mods-net.txt")"
 
     # Verify that once hmgapi-openlink is installed alongside the suite, pre-seeded allow_cellular grants LTE automatically
     mkdir -p "$R/data/hmgapi/mods/hmgapi-openlink"
@@ -229,10 +241,11 @@ with zipfile.ZipFile(matches[-1]) as z:
     print(json.loads(z.read("mod.json"))["version"])
 PY
 )
-    echo "== Standalone Comfort (${CVER}) & Light Vibes (0.7.0) package verification =="
+    echo "== Standalone Comfort (${CVER}), Light Vibes (0.7.0) & EQ Engine (0.7.7) package verification =="
     for spec in \
         "hmgapi-comfort:${CVER}" \
-        "light-vibes:0.7.0"
+        "light-vibes:0.7.0" \
+        "eq-engine:0.7.7"
     do
         mid=${spec%:*}
         mver=${spec#*:}
@@ -274,7 +287,7 @@ with zipfile.ZipFile(f"{d}/{mid}-v{ver}-nemesis-usb.zip") as outer:
 with zipfile.ZipFile(io.BytesIO(inner_bytes)) as inner:
     ndata = inner.read("NEMESIS.data").decode("utf-8")
     assert 'models="any"' in ndata, ndata
-    assert 'depends="hmgapi@>=1.0' in ndata, ndata
+    assert 'depends="hmgapi@>=1.' in ndata, ndata
 print("ok")
 PY
 )
