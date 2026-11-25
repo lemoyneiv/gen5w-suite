@@ -288,6 +288,13 @@ install_suite_mod() {
         if ! grep -q "$expected_uuid" "/data/hmgapi/mods/$id/META-HMGAPI/manifest.json" 2>/dev/null; then
             msg "Migrating $id to author key $expected_uuid (preserving settings)"
             "$HMGAPID" engine remove "$id" --from-nemesis >> "$LOG" 2>&1
+            if [ "$(getprop sys.boot_completed)" = 1 ]; then
+                case "$id" in
+                    hmgapi-comfort) pm uninstall dev.lemoyne.comfort >> "$LOG" 2>&1 ;;
+                    light-vibes)    pm uninstall lightvibes.app >> "$LOG" 2>&1 ;;
+                    eq-engine)      pm uninstall com.eqengine.app >> "$LOG" 2>&1 ;;
+                esac
+            fi
         fi
     fi
     msg "Installing mod $id from ${zip##*/}"
@@ -304,7 +311,7 @@ install_suite_mod wireless-carplay-aa "$USB/HMGAPI/updates/01-wireless-carplay-a
 install_suite_mod adb                 "$USB/HMGAPI/updates/02-adb.hmgapi.zip"                 "$VYSSE_UUID"
 install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"              "$SUITE_UUID"
 install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"          "$EGMP_UUID"
-install_suite_mod hmgapi-comfort      "$USB/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"      "$SUITE_UUID"
+install_suite_mod hmgapi-comfort      "$USB/HMGAPI/updates/05-hmgapi-comfort.hmgapi.zip"      "$SUITE_V2_UUID"
 install_suite_mod light-vibes         "$USB/HMGAPI/updates/06-light-vibes.hmgapi.zip"         "$SUITE_UUID"
 install_suite_mod eq-engine           "$USB/HMGAPI/updates/07-eq-engine.hmgapi.zip"           "$SUITE_V2_UUID"
 

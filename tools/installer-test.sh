@@ -96,11 +96,13 @@ printf '{"id": "aa-dpi", "version": "0.2.1"}\n' > "$R/data/hmgapi/mods/aa-dpi/mo
 printf '{"dpi": 240, "tap_limit": true}\n' > "$R/data/hmgapi/settings/aa-dpi.json"
 printf '{\n  "updates": false,\n  "overrides": {\n    "ignore_system": ["wireless-carplay-aa"]\n  }\n}\n' > "$R/data/hmgapi/settings/hmgapi.json"
 
-# Existing adb signed by old suite key (should be removed/migrated to VysseCodes UUID) +
+# Existing adb & hmgapi-comfort signed by old suite key (should be migrated while preserving settings) +
 # existing egmp-aa-ev already signed by AwsomeFox UUID (should NOT be removed)
-mkdir -p "$R/data/hmgapi/mods/adb/META-HMGAPI" "$R/data/hmgapi/mods/egmp-aa-ev/META-HMGAPI"
+mkdir -p "$R/data/hmgapi/mods/adb/META-HMGAPI" "$R/data/hmgapi/mods/egmp-aa-ev/META-HMGAPI" "$R/data/hmgapi/mods/hmgapi-comfort/META-HMGAPI"
 printf '{"uuid": "28ad71e0-07c0-8e61-8bf3-380cc71f9280"}\n' > "$R/data/hmgapi/mods/adb/META-HMGAPI/manifest.json"
 printf '{"uuid": "839375d3-8aea-884a-a9e9-c79964fe5d88"}\n' > "$R/data/hmgapi/mods/egmp-aa-ev/META-HMGAPI/manifest.json"
+printf '{"uuid": "28ad71e0-07c0-8e61-8bf3-380cc71f9280"}\n' > "$R/data/hmgapi/mods/hmgapi-comfort/META-HMGAPI/manifest.json"
+printf '{"heat_high_f": 28, "wheel_enabled": true}\n' > "$R/data/hmgapi/settings/hmgapi-comfort.json"
 
 # Stub USB files and head-unit binaries (nemesis, hmgapid, getprop, pm, am, reboot, sync)
 : > "$USB/packages/hmgapi.zip"
@@ -201,6 +203,9 @@ check "removed /data/hmgapi/hook/disable" "no" "$([ -e "$R/data/hmgapi/hook/disa
 check "created /data/hmgapi/hook/enable" "yes" "$([ -f "$R/data/hmgapi/hook/enable" ] && echo yes || echo no)"
 has "removed legacy leafia-helper mod from /data/hmgapi/mods" "hmgapid engine remove leafia-helper --from-nemesis" "$EVENTS"
 has "migrated old suite-signed adb to official VysseCodes UUID" "hmgapid engine remove adb --from-nemesis" "$EVENTS"
+has "migrated hmgapi-comfort author key cleanly" "hmgapid engine remove hmgapi-comfort --from-nemesis" "$EVENTS"
+has "uninstalled old-cert dev.lemoyne.comfort APK on migration" "pm-uninstall dev.lemoyne.comfort" "$EVENTS"
+check "preserved hmgapi-comfort.json user settings across migration" '{"heat_high_f": 28, "wheel_enabled": true}' "$(cat "$R/data/hmgapi/settings/hmgapi-comfort.json")"
 hasnt "kept already-matching AwsomeFox egmp-aa-ev without remove" "hmgapid engine remove egmp-aa-ev" "$EVENTS"
 has "ensured block_ambient_light is off" "hmgapid allow block_ambient_light off" "$EVENTS"
 has "installed 06-light-vibes.hmgapi.zip" "06-light-vibes.hmgapi.zip" "$EVENTS"

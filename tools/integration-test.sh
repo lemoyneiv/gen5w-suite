@@ -124,7 +124,7 @@ do
             04-egmp-aa-ev.hmgapi.zip)
                 has "$P: ${z##*/} signed by official AwsomeFox key" \
                     "author key 839375d3-8aea-884a-a9e9-c79964fe5d88" "$out" ;;
-            07-eq-engine.hmgapi.zip)
+            05-hmgapi-comfort.hmgapi.zip|07-eq-engine.hmgapi.zip)
                 has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" \
                     "author   lemoyneiv (author key 5aa22839-7070-8177-9660-14941b7463c5, on HMG-API's trusted author list)" "$out" ;;
             *)
@@ -145,6 +145,8 @@ do
     check "$P: eq-engine authors" "alexkozler, lemoyneiv" "$(mod_authors eq-engine)"
     check "$P: wireless-carplay-aa version 2.2.7" "2.2.7" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
+    check "$P: hmgapi-comfort version 1.1.9" "1.1.9" \
+        "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/hmgapi-comfort/mod.json")"
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
     check "$P: eq-engine version 0.7.7" "0.7.7" \
@@ -181,8 +183,8 @@ do
     has "$P: wifi.projection ask recorded in state/wifi.txt" "projection wireless-carplay-aa" "$(cat "$R/data/hmgapi/state/wifi.txt")"
     has "$P: hmgapi wifi boot keeper scheduled in state/services.txt" "hmgapi wifi root boot yes script /data/hmgapi/state/wifi.sh" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: egmp-aa-ev relay service scheduled" "egmp-aa-ev relay" "$(cat "$R/data/hmgapi/state/services.txt")"
-    has "$P: hmgapi-comfort fast-path welcome boot service scheduled" "hmgapi-comfort welcome system boot yes jar app/Comfort.apk dev.lemoyne.comfort.WelcomeDaemon" "$(cat "$R/data/hmgapi/state/services.txt")"
-    has "$P: hmgapi-comfort starter service scheduled" "hmgapi-comfort starter" "$(cat "$R/data/hmgapi/state/services.txt")"
+    has "$P: hmgapi-comfort fast-path welcome android service scheduled" "hmgapi-comfort welcome system android yes jar app/Comfort.apk dev.lemoyne.comfort.WelcomeDaemon" "$(cat "$R/data/hmgapi/state/services.txt")"
+    hasnt "$P: hmgapi-comfort omits obsolete starter shell service" "hmgapi-comfort starter" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: light-vibes lights service scheduled" "light-vibes lights" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: eq-engine early boot service scheduled" "eq-engine boot root boot yes script bin/boot.sh" "$(cat "$R/data/hmgapi/state/services.txt")"
     has "$P: Comfort.apk companion app scheduled" "dev.lemoyne.comfort hmgapi-comfort" "$(cat "$R/data/hmgapi/state/apps.txt")"

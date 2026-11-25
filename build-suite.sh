@@ -7,7 +7,7 @@
 #   dist/gen5w-suite-usb.zip                 One-tap NEMESIS execute USB stick (recommended)
 #   dist/gen5w-suite-nemesis-store-usb.zip   Interactive NEMESIS USB Package Store stick (type=list)
 #   dist/gen5w-suite-hmgapi-updates-usb.zip  HMG-API Updates stick (HMGAPI/updates/*.zip)
-#   dist/standalone/*.zip                    Standalone Comfort (1.1.8), Light Vibes (0.7.0) & EQ Engine (0.7.7)
+#   dist/standalone/*.zip                    Standalone Comfort (1.1.9), Light Vibes (0.7.0) & EQ Engine (0.7.7)
 #   dist/mods/*.zip                          Individual signed HMG-API + NEMESIS packages
 #   dist/SHA256SUMS                          SHA-256 checksums
 set -e
@@ -155,7 +155,7 @@ PY
 }
 
 WIRELESS_SHA=084486ac13260d27937bd9a69c996e94acfbea57
-COMFORT_SHA=fae56f8b70976faafffde90316c336f35c8bab65
+COMFORT_SHA=de6258619e6065c3c7e68194bacb1c3df5790045
 LIGHT_VIBES_SHA=dc0704927920e43882f84bc35ef87dbb6eeed9c6
 EQ_ENGINE_SHA=2feb050ebc63aaf1aeca10d136b5a7bb0add1002
 ADB_TAG=v1.0.1-rc.1
@@ -167,7 +167,7 @@ EGMP_UUID=839375d3-8aea-884a-a9e9-c79964fe5d88
 LEGACY_SUITE_UUID=28ad71e0-07c0-8e61-8bf3-380cc71f9280
 WIRELESS_REL_SHA=3c169c30242a030876b9f7c2af8d441efb99cc287659fd5d129a53e4f67eacd4
 AADPI_REL_SHA=60ffccd21822a4334080329a4bdf4a30ffc82bb5b5d600f5aee2c68514866a17
-COMFORT_REL_SHA=80496cd34e42f43577f07498442e7e287f85bd407cf5e5cf867d930a63fa2e05
+COMFORT_REL_SHA=6dbe534dd33c5cabea7734548fbbcc366938c8ea62ec7480d4633c5a041fc354
 LIGHT_VIBES_REL_SHA=027724010e5ca198b086f5d49afb7d137efd40af6c3f3271dd2b30be4cc5e641
 
 fetch_upstream hmgapi-wireless-cp-aa https://github.com/lemoyneiv/hmgapi-wireless-cp-aa.git "$WIRELESS_SHA"
