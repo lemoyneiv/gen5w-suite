@@ -7,7 +7,7 @@
 #   dist/gen5w-suite-usb.zip                 One-tap NEMESIS execute USB stick (recommended)
 #   dist/gen5w-suite-nemesis-store-usb.zip   Interactive NEMESIS USB Package Store stick (type=list)
 #   dist/gen5w-suite-hmgapi-updates-usb.zip  HMG-API Updates stick (HMGAPI/updates/*.zip)
-#   dist/standalone/*.zip                    Standalone Comfort (1.1.9), Light Vibes (0.7.0) & EQ Engine (0.7.7)
+#   dist/standalone/*.zip                    Standalone Comfort (1.1.10), Light Vibes (0.7.0) & EQ Engine (0.7.8)
 #   dist/mods/*.zip                          Individual signed HMG-API + NEMESIS packages
 #   dist/SHA256SUMS                          SHA-256 checksums
 set -e
@@ -56,8 +56,8 @@ if [ ! -e "$HOME/.hmgapi" ] && [ "$KEY_DIR" != "$HOME/.hmgapi" ]; then
 fi
 
 CORE_APP_KEY="$KEY_DIR/hmgapi-core-app.p12"
-if [ ! -f "$HMGAPI/out/sdk/VERSION" ] || [ "$(cat "$HMGAPI/out/sdk/VERSION" 2>/dev/null)" != "1.1.1-rc.23" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.23-nemesis-package.zip" ]; then
-    echo "== Building HMG-API Core 1.1.1-rc.23 & Mod SDK =="
+if [ ! -f "$HMGAPI/out/sdk/VERSION" ] || [ "$(cat "$HMGAPI/out/sdk/VERSION" 2>/dev/null)" != "1.1.1-rc.24" ] || [ ! -f "$HMGAPI/out/dist/hmgapi-1.1.1-rc.24-nemesis-package.zip" ]; then
+    echo "== Building HMG-API Core 1.1.1-rc.24 & Mod SDK =="
     (cd "$HMGAPI" && HMGAPI_KEY="$CORE_APP_KEY" ./build.sh && ./build.sh sdk && sh tools/mkinstallers.sh)
 fi
 HMGAPI_SDK=${HMGAPI_SDK:-$HMGAPI/out/sdk}
@@ -155,7 +155,7 @@ PY
 }
 
 WIRELESS_SHA=084486ac13260d27937bd9a69c996e94acfbea57
-COMFORT_SHA=de6258619e6065c3c7e68194bacb1c3df5790045
+COMFORT_SHA=a4be270e612c19d88ca8bf67af6b107bc9767637
 LIGHT_VIBES_SHA=dc0704927920e43882f84bc35ef87dbb6eeed9c6
 EQ_ENGINE_SHA=2feb050ebc63aaf1aeca10d136b5a7bb0add1002
 ADB_TAG=v1.0.1-rc.1
@@ -341,7 +341,7 @@ cp "$LV_HMG" "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}.hmgapi.zip"
 cp "$LV_NEM" "$SUITE_ROOT/dist/mods/light-vibes-v${LVVER}-nemesis-package.zip"
 wrap_standalone_usb "light-vibes" "$LVVER" "$LV_HMG" "$LV_NEM" "$SUITE_ROOT/dist/standalone"
 
-EQVER=0.7.7
+EQVER=0.7.8
 echo ""
 echo "=================================================================="
 echo " STEP 6c: Building, Testing & Signing eq-engine ${EQVER} (Gen5W-EQ-Engine)"

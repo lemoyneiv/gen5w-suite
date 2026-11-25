@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-prepare_eq_engine.py - Prepares hardened HMG-API `eq-engine` (0.7.7) from
+prepare_eq_engine.py - Prepares hardened HMG-API `eq-engine` (0.7.8) from
 `alexkozler/Gen5W-EQ-Engine` @ `2feb050` for inclusion in `Gen5W-Suite`:
 
 1. Native Gen5W Home Screen launcher tile (`icons/icon*.png` via `mkicon.sh`) +
    ★ Custom button (`provides.star_key`) + HMG-API `mod.json` (`id: "eq-engine"`).
-2. Early `hmgapid` `"start": "boot"` self-bootstrap (< 15 ms fast-path on normal
-   boots; atomic library/config sync + standalone `eqengine` preset restore on
-   first boot after install/update).
+2. Zero-fork early `hmgapid` `"start": "boot"` fast-path bind-mount (< 10 ms via
+   `/system/build.prop` + `verified_fw` stamp) + early-boot (`T_MOUNT < 10 s`)
+   `mediaserver` reload safety net so `libeqengine.so` and `vhq_load` activate
+   deterministically on every cold boot.
 3. Silent parked wake dormancy (`is_silent_parked_wake` via `/dev/.openlink-bt`
    and `hmgapid vehicle power doors.closed`): zero `EqService`, `act.sh keep`,
    `logcat`, or `Hold.java` `AudioTrack` wake during locked-cabin dark wakes.
-4. Cold-boot AA/CarPlay runway coordination (`el = 0..12 s`): defers `EqService`
-   and `act.sh keep` (`IDLE_AFTER=2`) until AA/CarPlay TCP is established, OR
-   `pcm2p == RUNNING`, OR `12 s` post-`boot_completed`.
+4. Cold-boot AA/CarPlay runway coordination (`el = 0..12 s`) + `8 s` `IDLE_AFTER`
+   settle past `SoundSettingApp` / `ModeManagerService.isBlockMedia()` (with retry)
+   so `48 kHz` `Hold` succeeds cleanly without touching `AudioFlinger` during AA connect.
 5. Ephemeral `tmpfs` `/dev/eqengine` for high-frequency IPC and scratch files
    (`cpw/live.bin`, `cpw/status.<pid>`, `share/cp_eq.bin`, `af.txt`, `hold/`,
-   `r48_hal*.txt`, `resampler.log`, `resampler.pid`) + `30 s` cap on
+   `r48_hal*.txt`, `resampler.log`, `resampler.pid`) + `45 s` cap on
    `resampler.log` `logcat` capture.
 6. HMG-API lifecycle & master-switch cleanliness (`act.sh on`/`off` via
    `hmgapid service-restart/stop` + `SIGTERM`/`SIGINT` unmount traps in
@@ -122,8 +123,14 @@ def patch_native_and_app(repo: Path) -> None:
         "CarPlayEq.java tmpfs paths",
     )
 
-    # 3. app/src/com/eqengine/app/MainActivity.java: read /dev/eqengine/cpw & /dev/eqengine/resampler.log
+    # 3. app/src/com/eqengine/app/MainActivity.java: bump VERSION to 0.7.8 & read /dev/eqengine
     main_java = repo / "app/src/com/eqengine/app/MainActivity.java"
+    replace_exact(
+        main_java,
+        '    static final String VERSION = "0.7.7";',
+        '    static final String VERSION = "0.7.8";',
+        "MainActivity.java VERSION 0.7.8",
+    )
     replace_exact(
         main_java,
         '    private static final String CPW = "/data/eqengine/cpw";',
@@ -159,8 +166,16 @@ def patch_native_and_app(repo: Path) -> None:
         "Root.java nemesis binary fallback",
     )
 
-    # 5. app/AndroidManifest.xml: add app icon + DEFAULT & LAUNCHER categories
+    # 5. app/AndroidManifest.xml: bump to 0.7.8 + add app icon + DEFAULT & LAUNCHER categories
     manifest = repo / "app/AndroidManifest.xml"
+    replace_exact(
+        manifest,
+        '    android:versionCode="26"\n'
+        '    android:versionName="0.7.7">',
+        '    android:versionCode="27"\n'
+        '    android:versionName="0.7.8">',
+        "AndroidManifest.xml version 0.7.8",
+    )
     replace_exact(
         manifest,
         '    <application\n'
@@ -194,9 +209,24 @@ def patch_native_and_app(repo: Path) -> None:
         check=True,
     )
 
+    nemesis_data = repo / "pkg/NEMESIS.data"
+    replace_exact(
+        nemesis_data,
+        "package-version=0.7.7",
+        "package-version=0.7.8",
+        "pkg/NEMESIS.data version 0.7.8",
+    )
+
 
 def patch_act_sh(repo: Path) -> None:
     act = repo / "pkg/bin/act.sh"
+
+    replace_exact(
+        act,
+        "VER=0.7.7",
+        "VER=0.7.8",
+        "act.sh VER 0.7.8",
+    )
 
     # 1. Configure RAM tmpfs /dev/eqengine for AF_F, HOLD_D, HAL_TMP, CPW_D, SHARE_D
     replace_exact(
@@ -228,6 +258,41 @@ def patch_act_sh(repo: Path) -> None:
         'HOLD_D=$S/hold',
         'HOLD_D=$RAM/hold',
         "act.sh HOLD_D tmpfs",
+    )
+
+    # Guard hold_begin against $S/late_list (never spawn Hold.java when mediaserver missed overlay)
+    replace_exact(
+        act,
+        '    if [ -n "$K_PID" ] && [ -f $PROC/$K_PID/maps ] && ! maps_has $K_PID libeqengine.so; then\n'
+        '        HOLD_WHY="EQ Engine\'s filter is not loaded in this audio server"\n'
+        '        HOLD_NOFX=1\n'
+        '        return 1\n'
+        '    fi',
+        '    if [ -f $S/late_list ] || { [ -n "$K_PID" ] && [ -f $PROC/$K_PID/maps ] && ! maps_has $K_PID libeqengine.so; }; then\n'
+        '        HOLD_WHY="EQ Engine\'s filter is not loaded in this audio server"\n'
+        '        HOLD_NOFX=1\n'
+        '        return 1\n'
+        '    fi',
+        "act.sh hold_begin late_list guard",
+    )
+
+    # Allow keep_idle one retry after IDLE_AFTER (>= 8 s) if ModeManagerService.isBlockMedia() rejected the first Hold
+    replace_exact(
+        act,
+        '    # another process took the main link meanwhile: tried again once it has been free for a while\n'
+        '    [ -n "$HOLD_OTHER" ] && K_IDLED=""\n'
+        '    return 0',
+        '    # another process took the main link meanwhile, or SoundSettingApp/ModeManager still blocked\n'
+        '    # media on cold boot: try once more after IDLE_AFTER (>= 8 s) when EQ Engine\'s filter is loaded\n'
+        '    if [ -n "$HOLD_OTHER" ]; then\n'
+        '        K_IDLED=""\n'
+        '    elif [ -n "$K_HOLDFAIL" ] && [ -z "$HOLD_NOFX" ] && [ $IDLE_AFTER -ge 8 ] && [ "$K_IRETRY" != "$K_PID" ]; then\n'
+        '        K_IRETRY=$K_PID\n'
+        '        K_IDLED=""\n'
+        '        K_SINCE=$UPNOW\n'
+        '    fi\n'
+        '    return 0',
+        "act.sh keep_idle cold-boot blockMedia retry",
     )
 
     # 2. ScriptCheck compliance in watch_on (avoid $(...) followed by ; inside "...")
@@ -319,7 +384,7 @@ def patch_act_sh(repo: Path) -> None:
         "act.sh hal_from tmpfs",
     )
 
-    # 4. Add TERM/INT trap to keep_loop so hmgapid/disable releases Hold.java cleanly
+    # 4. Add TERM/INT trap + K_IRETRY init to keep_loop so hmgapid/disable releases Hold.java cleanly
     replace_exact(
         act,
         'keep_loop() {\n'
@@ -327,6 +392,7 @@ def patch_act_sh(repo: Path) -> None:
         '    chmod 644 $KEEP_PID',
         'keep_loop() {\n'
         '    trap \'hold_end; rm -f $KEEP_PID; exit 0\' TERM INT\n'
+        '    K_IRETRY=""\n'
         '    echo $$ > $KEEP_PID\n'
         '    chmod 644 $KEEP_PID',
         "act.sh keep_loop TERM trap",
@@ -448,7 +514,14 @@ def patch_act_sh(repo: Path) -> None:
 def patch_boot_sh(repo: Path) -> None:
     boot = repo / "pkg/bin/boot.sh"
 
-    # 1. Configure RAM tmpfs, MOD_DIR self-bootstrap, HMGAPID, RUNWAY_WAIT, and CAP_MAX
+    replace_exact(
+        boot,
+        "VER=0.7.7",
+        "VER=0.7.8",
+        "boot.sh VER 0.7.8",
+    )
+
+    # 1. Configure RAM tmpfs, MOD_DIR self-bootstrap, zero-fork build.prop + verified_fw fast-path mount, HMGAPID, RUNWAY_WAIT, and CAP_MAX
     replace_exact(
         boot,
         'MOUNT=mount\n'
@@ -496,6 +569,7 @@ def patch_boot_sh(repo: Path) -> None:
         '                rm -rf /data/hmgapi/eqengine-migrate\n'
         '            fi\n'
         '            chmod 755 $D $D/lib $D/conf $S $D/bin\n'
+        '            rm -f $S/verified_fw\n'
         '            [ -z "$_inst_st" ] && echo installed > $S/fresh_install\n'
         '            echo "${_pkg_st:-installed}" > $S/mod_stamp\n'
         '            chmod 644 $S/mod_stamp\n'
@@ -505,11 +579,86 @@ def patch_boot_sh(repo: Path) -> None:
         'fi\n'
         'RES_LOG=$RAM/resampler.log\n'
         'RES_PID=$RAM/resampler.pid\n'
-        'HOLD_D=$RAM/hold',
-        "boot.sh early self-bootstrap and RAM tmpfs setup",
+        'HOLD_D=$RAM/hold\n'
+        'BUILD_PROP=${EQE_TEST_ROOT:-}/system/build.prop\n'
+        'FW_STAMP=""\n'
+        'if [ -f "$BUILD_PROP" ]; then\n'
+        '    _fwp=""\n'
+        '    while IFS=\'=\' read -r _bk _bv; do\n'
+        '        case "$_bk" in\n'
+        '            ro.build.fingerprint|ro.build.display.id|ro.build.version.incremental)\n'
+        '                _fwp="${_fwp:+$_fwp|}$_bv" ;;\n'
+        '        esac\n'
+        '    done < "$BUILD_PROP"\n'
+        '    _mst=""\n'
+        '    [ -f $S/mod_stamp ] && read -r _mst < $S/mod_stamp\n'
+        '    [ -n "$_fwp" ] && FW_STAMP="$_fwp:$_mst"\n'
+        'fi\n'
+        'FAST_MOUNTED=0\n'
+        'if [ -n "$FW_STAMP" ] && [ -f $S/verified_fw ] && [ ! -f $S/fresh_install ] && [ ! -f $S/disabled ] && [ ! -f $VENDOR ] && [ -f $LIB ] && [ -f $OURS ]; then\n'
+        '    _vfw=""\n'
+        '    read -r _vfw < $S/verified_fw\n'
+        '    if [ "$_vfw" = "$FW_STAMP" ]; then\n'
+        '        read _fua0 _fur < $PROC/uptime\n'
+        '        _fbid=""\n'
+        '        [ -f $PROC/sys/kernel/random/boot_id ] && read _fbid < $PROC/sys/kernel/random/boot_id\n'
+        '        [ -n "$_fbid" ] || _fbid="unknown-${_fua0%%.*}"\n'
+        '        _fstr=0\n'
+        '        [ -f $S/strikes ] && read _fstr < $S/strikes\n'
+        '        case "$_fstr" in \'\'|*[!0-9]*) _fstr=0 ;; esac\n'
+        '        _fev=""; _fupd=0\n'
+        '        if [ -f $S/lastboot ]; then\n'
+        '            read _fpbid _fpph < $S/lastboot\n'
+        '            if [ "$_fpbid" != "$_fbid" ]; then\n'
+        '                _fupd=1\n'
+        '                case "$_fpph" in\n'
+        '                    applied|crashed) _fstr=$((_fstr + 1)); _fev="previous start ended before it was confirmed good ($_fpph): strike $_fstr" ;;\n'
+        '                    installed) _fev="previous start was the install\'s (the running audio server could not load the filter yet): not counted" ;;\n'
+        '                    good) _fstr=0 ;;\n'
+        '                esac\n'
+        '            fi\n'
+        '        fi\n'
+        '        _fm_mnt=0\n'
+        '        while read _fmd _fmm _fmr; do\n'
+        '            [ "$_fmm" = "$TARGET" ] && _fm_mnt=1\n'
+        '        done < $PROC/mounts\n'
+        '        if [ $_fstr -lt 2 ] && [ $_fm_mnt = 0 ]; then\n'
+        '            if $MOUNT -o bind $OURS $TARGET; then\n'
+        '                FAST_MOUNTED=1\n'
+        '                read _fua _fur < $PROC/uptime\n'
+        '                T_MOUNT=$_fua\n'
+        '                T_START=$_fua0; SNAP_MS=""; SNAP_FX=unknown\n'
+        '                BID=$_fbid; FRESH=0; STRIKES=$_fstr; EV_PREV=$_fev\n'
+        '                NM_STATE=""; PRE_MOUNTED=0\n'
+        '                [ $_fupd = 1 ] && echo $STRIKES > $S/strikes\n'
+        '                echo "$BID applied" > $S/lastboot\n'
+        '                for _sf in $PROC/[0-9]*/stat; do\n'
+        '                    [ -f $_sf ] || continue\n'
+        '                    _sl=""\n'
+        '                    { read -r _sl < $_sf; } 2>/dev/null\n'
+        '                    case "$_sl" in *" (mediaserver) "*) SNAP_MS=${_sl%% *}; break ;; esac\n'
+        '                done\n'
+        '                if [ -n "$SNAP_MS" ]; then\n'
+        '                    SNAP_FX=none\n'
+        '                    if [ -f $PROC/$SNAP_MS/maps ]; then\n'
+        '                        while read _ma _mp _mo _md _mi _mf; do\n'
+        '                            case "$_mf" in\n'
+        '                                */libeqengine.so|*/libeqengine.so" (deleted)") SNAP_FX=ours; break ;;\n'
+        '                                */soundfx/*) SNAP_FX=factory ;;\n'
+        '                            esac\n'
+        '                        done < $PROC/$SNAP_MS/maps\n'
+        '                    fi\n'
+        '                fi\n'
+        '                read _fua _fur < $PROC/uptime\n'
+        '                T_CHECK=$_fua\n'
+        '            fi\n'
+        '        fi\n'
+        '    fi\n'
+        'fi',
+        "boot.sh early self-bootstrap, zero-fork fast-path mount, and RAM tmpfs setup",
     )
 
-    # 2. Pass EQE_IDLE_AFTER=2 when starting keeper from boot.sh, and add stop_keeper_and_hold + sync_app_owner + silent-wake & runway helpers
+    # 2. Keep default IDLE_AFTER=8 (past SoundSettingApp / ModeManager.isBlockMedia), and add stop_keeper_and_hold + sync_app_owner + silent-wake & runway helpers
     replace_exact(
         boot,
         'keep_start() {\n'
@@ -518,7 +667,7 @@ def patch_boot_sh(repo: Path) -> None:
         '    chmod 644 $S/keep.pid\n'
         '}',
         'keep_start() {\n'
-        '    EQE_IDLE_AFTER=${EQE_IDLE_AFTER:-2} $KEEP_CMD < /dev/null > /dev/null 2>&1 &\n'
+        '    $KEEP_CMD < /dev/null > /dev/null 2>&1 &\n'
         '    echo $! > $S/keep.pid\n'
         '    chmod 644 $S/keep.pid\n'
         '}\n'
@@ -615,6 +764,105 @@ def patch_boot_sh(repo: Path) -> None:
         '    return 1\n'
         '}',
         "boot.sh helpers for keep, silent wake, and runway",
+    )
+
+    # 2b. Add early cold-boot (T_MOUNT < 10 s, boot_completed != 1) mediaserver reload safety net in early_check()
+    replace_exact(
+        boot,
+        '    if [ "$RESULT" = late ] && [ $FRESH = 0 ]; then\n'
+        '        echo "$BID $_ms" > $S/late_list\n'
+        '        chmod 644 $S/late_list\n'
+        '        REASON="effects list overlay applied, but the audio server read its effects list before it: EQ Engine is not active until Android\'s audio is restarted (parked)"\n'
+        '        event "Android\'s audio server ($_ms) read the factory effects list before the overlay was in place: EQ Engine is not active this start. Restart Android audio once (parked); the EQ Engine app offers it"\n'
+        '    fi',
+        '    if [ "$RESULT" = late ] && [ $FRESH = 0 ]; then\n'
+        '        _tm_s=${T_MOUNT%%.*}\n'
+        '        if [ -n "$_tm_s" ] && [ "$_tm_s" -lt 10 ] 2>/dev/null && [ "$(getprop sys.boot_completed)" != 1 ] && ! is_silent_parked_wake; then\n'
+        '            conv_quality\n'
+        '            setprop af.resampler.quality $CONV\n'
+        '            echo "$_tm_s" > $S/expected_restart\n'
+        '            chmod 644 $S/expected_restart\n'
+        '            kill $_ms 2>/dev/null\n'
+        '            _ri=0; _nms=""\n'
+        '            while [ $_ri -lt 5 ]; do\n'
+        '                sleep 1\n'
+        '                _nms=$(ms_pid)\n'
+        '                if [ -n "$_nms" ] && [ "$_nms" != "$_ms" ]; then\n'
+        '                    fx_now $_nms\n'
+        '                    [ "$FX" = ours ] && break\n'
+        '                fi\n'
+        '                _ri=$((_ri + 1))\n'
+        '            done\n'
+        '            if [ -n "$_nms" ] && [ "$_nms" != "$_ms" ]; then\n'
+        '                rm -f $S/late_list $S/expected_restart\n'
+        '                RESULT=reloaded_early\n'
+        '                {\n'
+        '                    echo "boot_id=$BID"\n'
+        '                    echo "step_start=$T_START"\n'
+        '                    echo "step_process=$T_PROC"\n'
+        '                    echo "overlay_at=$T_MOUNT"\n'
+        '                    echo "checked_at=$T_CHECK"\n'
+        '                    echo "audio_server_pid=$_nms"\n'
+        '                    echo "audio_server_start=$MS_START"\n'
+        '                    echo "loaded_at_overlay=$FX_AT"\n'
+        '                    echo "result=$RESULT"\n'
+        '                    echo "fresh_install=$FRESH"\n'
+        '                } > $S/boot_timing\n'
+        '                chmod 644 $S/boot_timing\n'
+        '                event "early cold-boot audio server ($_ms) read factory effects list before overlay at ${T_MOUNT} s; reloaded as pid $_nms before Android boot completed (EQ Engine active)"\n'
+        '                return 0\n'
+        '            fi\n'
+        '        fi\n'
+        '        echo "$BID $_ms" > $S/late_list\n'
+        '        chmod 644 $S/late_list\n'
+        '        REASON="effects list overlay applied, but the audio server read its effects list before it: EQ Engine is not active until Android\'s audio is restarted (parked)"\n'
+        '        event "Android\'s audio server ($_ms) read the factory effects list before the overlay was in place: EQ Engine is not active this start. Restart Android audio once (parked); the EQ Engine app offers it"\n'
+        '    fi',
+        "boot.sh early_check mediaserver reload safety net",
+    )
+
+    # 2c. Skip standard pre-mount md5 block when FAST_MOUNTED=1, and write/clear $S/verified_fw
+    replace_exact(
+        boot,
+        'up_at\n'
+        'T_START=$UP_AT',
+        'if [ $FAST_MOUNTED = 0 ]; then\n'
+        'up_at\n'
+        'T_START=$UP_AT',
+        "boot.sh guard standard overlay block when FAST_MOUNTED=1",
+    )
+    replace_exact(
+        boot,
+        '        if $MOUNT -o bind $OURS $TARGET; then\n'
+        '            up_at\n'
+        '            T_MOUNT=$UP_AT\n'
+        '            snap_ms\n'
+        '        else\n'
+        '            NM_STATE=refused; NM_REASON="the in-memory overlay could not be mounted"; NM_PHASE=refused\n'
+        '        fi\n'
+        '    fi\n'
+        'fi',
+        '        if $MOUNT -o bind $OURS $TARGET; then\n'
+        '            up_at\n'
+        '            T_MOUNT=$UP_AT\n'
+        '            snap_ms\n'
+        '            [ -n "$FW_STAMP" ] && echo "$FW_STAMP" > $S/verified_fw\n'
+        '        else\n'
+        '            NM_STATE=refused; NM_REASON="the in-memory overlay could not be mounted"; NM_PHASE=refused\n'
+        '        fi\n'
+        '    fi\n'
+        'fi\n'
+        'fi',
+        "boot.sh record verified_fw and close FAST_MOUNTED guard",
+    )
+    replace_exact(
+        boot,
+        '    if ! mounted || [ "$(md5of $TARGET)" != "$EXPECT_OURS" ]; then\n'
+        '        unmount_all',
+        '    if ! mounted || [ "$(md5of $TARGET)" != "$EXPECT_OURS" ]; then\n'
+        '        rm -f $S/verified_fw\n'
+        '        unmount_all',
+        "boot.sh clear verified_fw on post-mount mismatch",
     )
 
     # 3. Update resampler.log capture to use $RES_LOG/$RES_PID on tmpfs + 30s CAP_MAX auto-stop
@@ -1016,7 +1264,7 @@ def create_hmgapi_mod_scaffold(repo: Path, hmgapi_dir: Path) -> None:
     mod_json = {
         "id": "eq-engine",
         "name": "EQ Engine",
-        "version": "0.7.7",
+        "version": "0.7.8",
         "hmgapi": ">=1.1.1",
         "authors": ["alexkozler", "lemoyneiv"],
         "license": "GPL-2.0-only",
@@ -1164,7 +1412,7 @@ chmod 755 "$HERE/eq-engine/bin/"* "$HERE/eq-engine/open.sh"
 
 # Deterministic mod_stamp across staged payload so boot.sh fast-paths normal boots in <15ms
 STAMP=$(cd "$HERE/eq-engine" && sha256sum lib/*.so conf/* bin/* | sha256sum | cut -d' ' -f1)
-echo "0.7.7-$STAMP" > "$HERE/eq-engine/lib/mod_stamp"
+echo "0.7.8-$STAMP" > "$HERE/eq-engine/lib/mod_stamp"
 
 echo "== 3. Running EQ Engine ASan/UBSan C filter, VHQ resampler, CarPlay watch & shell suites =="
 export ASAN_OPTIONS=detect_leaks=0
@@ -1176,7 +1424,7 @@ sh "$HERE/native/cpwtest/run.sh"
 EQE_CAR="$HERE/car-files" bash "$HERE/tests/boot/run.sh" dash
 sh "$HERE/test-hmgapi.sh"
 
-echo "== 4. Checking HMG-API points, head-unit shell commands & signing eq-engine 0.7.7 =="
+echo "== 4. Checking HMG-API points, head-unit shell commands & signing eq-engine 0.7.8 =="
 python3 "$HMGAPI_SDK/bin/check-points.py" "$HERE/eq-engine"
 sh "$HMGAPI_SDK/bin/check-scripts.sh" "$HERE/eq-engine"
 PKG_OUT=$(OUT="$HERE/out" sh "$HMGAPI_SDK/bin/mkmodpkg.sh" "$HERE/eq-engine" "$HMGAPI_KEY")
@@ -1185,9 +1433,9 @@ SIGNED_ZIP=$(echo "$PKG_OUT" | tail -1)
 OUT="$HERE/out" sh "$HMGAPI_SDK/bin/mknemesismod.sh" "$SIGNED_ZIP"
 
 mkdir -p "$HERE/dist"
-cp "$SIGNED_ZIP" "$HERE/dist/eq-engine-v0.7.7.hmgapi.zip"
-cp "$HERE/out/dist/eq-engine-0.7.7-nemesis-package.zip" "$HERE/dist/eq-engine-v0.7.7-nemesis-package.zip"
-python3 - "$HERE/eq-engine/open.sh" "$HERE/dist/eq-engine-v0.7.7-nemesis-package.zip" <<'PY'
+cp "$SIGNED_ZIP" "$HERE/dist/eq-engine-v0.7.8.hmgapi.zip"
+cp "$HERE/out/dist/eq-engine-0.7.8-nemesis-package.zip" "$HERE/dist/eq-engine-v0.7.8-nemesis-package.zip"
+python3 - "$HERE/eq-engine/open.sh" "$HERE/dist/eq-engine-v0.7.8-nemesis-package.zip" <<'PY'
 import sys, zipfile
 open_bytes = open(sys.argv[1], "rb").read()
 pkg = sys.argv[2]
@@ -1202,7 +1450,7 @@ PY
     )
     build_sh.chmod(0o755)
 
-    # Write test-hmgapi.sh verifying all 6 suite hardening behaviors + HMG-API Engine plan/apply/remove
+    # Write test-hmgapi.sh verifying all suite hardening behaviors + HMG-API Engine plan/apply/remove
     test_sh = repo / "test-hmgapi.sh"
     test_sh.write_text(
         """#!/bin/sh
@@ -1246,7 +1494,8 @@ has "vehicle readings power & doors.closed registered" "power" "$(cat "$R/data/h
 has "vehicle reading doors.closed registered" "doors.closed" "$(cat "$R/data/hmgapi/state/vehicle.txt")"
 has "boot service scheduled in services.txt" "eq-engine boot root boot yes script bin/boot.sh" "$(cat "$R/data/hmgapi/state/services.txt")"
 
-# 3. Verify silent parked wake dormancy, cold-boot 12s runway deferral, 30s logcat cap, hmgapid act.sh on, and SIGTERM unmount
+# 3. Verify silent parked wake dormancy, cold-boot 12s runway deferral, 30s logcat cap, hmgapid act.sh on, SIGTERM unmount,
+#    zero-fork build.prop + verified_fw fast-path mount, and early cold-boot mediaserver reload
 SROOT="$T/sim"
 mkdir -p "$SROOT/system/etc" "$SROOT/vendor/etc" "$SROOT/data/eqengine/lib" "$SROOT/data/eqengine/conf" \\
          "$SROOT/data/eqengine/bin" "$SROOT/dev" "$SROOT/proc/sys/kernel/random" "$SROOT/proc/net" "$T/stubs"
@@ -1257,17 +1506,22 @@ cp "$M/bin/act.sh" "$SROOT/data/eqengine/bin/act.sh"
 echo "5.00 2.00" > "$SROOT/proc/uptime"
 echo "boot-suite-1" > "$SROOT/proc/sys/kernel/random/boot_id"
 echo "/dev/block/system /system ext4 ro 0 0" > "$SROOT/proc/mounts"
+echo 200 > "$T/mspid"
 mkdir -p "$SROOT/proc/200"
 echo "200 (mediaserver) S 1 200 0 0 -1 4194560 100 0 0 0 10 5 0 0 20 0 9 0 280 30000000 2000 4294967295" > "$SROOT/proc/200/stat"
 echo "b6f00000-b6f10000 r-xp 00000000 b3:19 11 /data/eqengine/lib/libeqengine.so" > "$SROOT/proc/200/maps"
 echo "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode" > "$SROOT/proc/net/tcp"
+echo 1 > "$T/boot_completed"
 
-cat > "$T/stubs/md5" <<'EOF'
+cat > "$T/stubs/md5" <<EOF
 #!/bin/sh
-md5sum "$1"
+echo "md5 \\$1" >> "$T/md5.log"
+md5sum "\\$1"
 EOF
 cat > "$T/stubs/mount" <<EOF
 #!/bin/sh
+n=0; [ -f "$T/md5.log" ] && n=\\$(wc -l < "$T/md5.log" | tr -d ' ')
+echo "mount_md5_before=\\$n" >> "$T/mount_fast.log"
 cp "\\$4" "\\$4.orig" && cp "\\$3" "\\$4" && echo "none \\$4 none rw 0 0" >> "$SROOT/proc/mounts"
 EOF
 cat > "$T/stubs/umount" <<EOF
@@ -1279,11 +1533,13 @@ EOF
 cat > "$T/stubs/ps" <<EOF
 #!/bin/sh
 echo "USER PID PPID VSIZE RSS WCHAN PC S NAME"
-echo "media 200 1 33148 9784 ffffffff b6ea0870 S /system/bin/mediaserver"
+mp=\\$(cat "$T/mspid" 2>/dev/null)
+[ -n "\\$mp" ] && [ -d "$SROOT/proc/\\$mp" ] && echo "media \\$mp 1 33148 9784 ffffffff b6ea0870 S /system/bin/mediaserver"
+exit 0
 EOF
 cat > "$T/stubs/getprop" <<EOF
 #!/bin/sh
-[ "\\$1" = "sys.boot_completed" ] && echo 1
+[ "\\$1" = "sys.boot_completed" ] && cat "$T/boot_completed" 2>/dev/null
 exit 0
 EOF
 cat > "$T/stubs/setprop" <<EOF
@@ -1320,6 +1576,17 @@ EOF
 cat > "$T/stubs/sleep" <<EOF
 #!/bin/sh
 read u r < "$SROOT/proc/uptime"; u=\\${u%%.*}; echo "\\$((u + \\$1)).00 2.00" > "$SROOT/proc/uptime"
+if [ -f "$T/early_reload_pid" ]; then
+    ep=\\$(cat "$T/early_reload_pid")
+    if [ -n "\\$ep" ] && ! kill -0 "\\$ep" 2>/dev/null && [ -f "$SROOT/data/eqengine/state/expected_restart" ]; then
+        rm -f "$T/early_reload_pid"
+        rm -rf "$SROOT/proc/\\$ep"
+        mkdir -p "$SROOT/proc/201"
+        echo "201 (mediaserver) S 1 201 0 0 -1 4194560 100 0 0 0 10 5 0 0 20 0 9 0 490 30000000 2000 4294967295" > "$SROOT/proc/201/stat"
+        echo "b6f00000-b6f10000 r-xp 00000000 b3:19 11 /data/eqengine/lib/libeqengine.so" > "$SROOT/proc/201/maps"
+        echo 201 > "$T/mspid"
+    fi
+fi
 /bin/sleep 0.02
 EOF
 chmod +x "$T/stubs/"*
@@ -1383,12 +1650,120 @@ check "SIGTERM on mod disable unmounted audio_effects.conf back to stock" \\
     "$(md5sum "$SROOT/system/etc/audio_effects.conf" | cut -d' ' -f1)"
 has "SIGTERM trap reset af.resampler.quality=0" "af.resampler.quality=0" "$(cat "$T/setprop.log")"
 has "SIGTERM trap wrote state=off" "state=off" "$(cat "$SROOT/data/eqengine/state/status")"
+rm -f "$SROOT/mod_disabled" "$SROOT/data/eqengine/state/disabled" "$SROOT/data/eqengine/state/strikes" "$SROOT/data/eqengine/state/lastboot"
 
 # 3d. Verify act.sh on invokes hmgapid service-restart eq-engine boot
 echo "state=applied" > "$SROOT/data/eqengine/state/status"
 PATH="$T/stubs:/usr/bin:/bin" EQE_TEST_ROOT="$SROOT" EQE_HMGAPID="$T/stubs/hmgapid" \\
     sh "$M/bin/act.sh" on >/dev/null
 has "act.sh on restarted eq-engine boot via hmgapid" "hmgapid service-restart eq-engine boot" "$(cat "$T/hmgapid.log")"
+
+# 3e. Verify zero-fork build.prop + verified_fw fast-path mount (0 pre-mount md5 forks) & OTA firmware-change refusal
+printf 'ro.build.fingerprint=Hyundai/NEEV23/260507\\nro.build.version.incremental=260507\\n' > "$SROOT/system/build.prop"
+cp "$M/lib/mod_stamp" "$SROOT/data/eqengine/state/mod_stamp"
+echo "3.10 1.00" > "$SROOT/proc/uptime"
+echo "boot-fw-1" > "$SROOT/proc/sys/kernel/random/boot_id"
+rm -f "$T/md5.log" "$T/mount_fast.log" "$SROOT/data/eqengine/state/verified_fw" "$SROOT/data/eqengine/state/events.log"
+PATH="$T/stubs:/usr/bin:/bin" EQE_TEST_ROOT="$SROOT" EQE_PROC="$SROOT/proc" \\
+    EQE_RAM_DIR="$SROOT/dev/eqengine" EQE_HMGAPID="$T/stubs/hmgapid" \\
+    EQE_RUNWAY_WAIT=0 EQE_CAP_MAX=6 EQE_GOOD_AFTER=5 EQE_KEEP_CMD="$T/stubs/keeper" \\
+    sh "$M/bin/boot.sh" >/dev/null 2>&1 &
+BPID=$!
+i=0
+while [ $i -lt 60 ] && ! grep -q "confirmed good" "$SROOT/data/eqengine/state/events.log" 2>/dev/null; do
+    /bin/sleep 0.02
+    i=$((i + 1))
+done
+kill -TERM "$BPID" 2>/dev/null || true
+wait "$BPID" 2>/dev/null || true
+check "first boot recorded verified_fw stamp" "yes" "$(test -s "$SROOT/data/eqengine/state/verified_fw" && echo yes || echo no)"
+has "first boot ran 2 pre-mount md5 checks" "mount_md5_before=2" "$(cat "$T/mount_fast.log")"
+
+"$T/stubs/umount" "$SROOT/system/etc/audio_effects.conf"
+rm -f "$T/md5.log" "$T/mount_fast.log" "$SROOT/data/eqengine/state/events.log"
+echo "3.05 1.00" > "$SROOT/proc/uptime"
+echo "boot-fw-2" > "$SROOT/proc/sys/kernel/random/boot_id"
+PATH="$T/stubs:/usr/bin:/bin" EQE_TEST_ROOT="$SROOT" EQE_PROC="$SROOT/proc" \\
+    EQE_RAM_DIR="$SROOT/dev/eqengine" EQE_HMGAPID="$T/stubs/hmgapid" \\
+    EQE_RUNWAY_WAIT=0 EQE_CAP_MAX=6 EQE_GOOD_AFTER=5 EQE_KEEP_CMD="$T/stubs/keeper" \\
+    sh "$M/bin/boot.sh" >/dev/null 2>&1 &
+BPID=$!
+i=0
+while [ $i -lt 60 ] && ! grep -q "confirmed good" "$SROOT/data/eqengine/state/events.log" 2>/dev/null; do
+    /bin/sleep 0.02
+    i=$((i + 1))
+done
+kill -TERM "$BPID" 2>/dev/null || true
+wait "$BPID" 2>/dev/null || true
+has "second boot fast-mounted with ZERO pre-mount md5 forks" "mount_md5_before=0" "$(cat "$T/mount_fast.log")"
+
+"$T/stubs/umount" "$SROOT/system/etc/audio_effects.conf"
+printf 'ro.build.fingerprint=Hyundai/NEEV23/270101\\nro.build.version.incremental=270101\\n' > "$SROOT/system/build.prop"
+echo "# ota changed stock list" >> "$SROOT/system/etc/audio_effects.conf"
+echo "3.20 1.00" > "$SROOT/proc/uptime"
+echo "boot-fw-3" > "$SROOT/proc/sys/kernel/random/boot_id"
+PATH="$T/stubs:/usr/bin:/bin" EQE_TEST_ROOT="$SROOT" EQE_PROC="$SROOT/proc" \\
+    EQE_RAM_DIR="$SROOT/dev/eqengine" EQE_HMGAPID="$T/stubs/hmgapid" \\
+    EQE_RUNWAY_WAIT=0 EQE_CAP_MAX=6 EQE_GOOD_AFTER=5 EQE_KEEP_CMD="$T/stubs/keeper" \\
+    sh "$M/bin/boot.sh" >/dev/null 2>&1
+has "firmware change invalidated fast-path and refused modified stock list" "state=refused" "$(cat "$SROOT/data/eqengine/state/status")"
+
+# 3f. Verify early cold-boot (T_MOUNT < 10 s, sys.boot_completed != 1) mediaserver reload clears late_list cleanly
+cp "$HERE/car-files/audio_effects.conf" "$SROOT/system/etc/audio_effects.conf"
+printf 'ro.build.fingerprint=Hyundai/NEEV23/260507\\nro.build.version.incremental=260507\\n' > "$SROOT/system/build.prop"
+rm -rf "$SROOT/proc/200" "$SROOT/data/eqengine/state/events.log" "$SROOT/data/eqengine/state/late_list" "$SROOT/data/eqengine/state/boot_timing"
+echo 0 > "$T/boot_completed"
+echo "3.90 1.00" > "$SROOT/proc/uptime"
+echo "boot-early-reload" > "$SROOT/proc/sys/kernel/random/boot_id"
+/bin/sleep 60 &
+MS_EARLY=$!
+echo "$MS_EARLY" > "$T/mspid"
+echo "$MS_EARLY" > "$T/early_reload_pid"
+mkdir -p "$SROOT/proc/$MS_EARLY"
+echo "$MS_EARLY (mediaserver) S 1 $MS_EARLY 0 0 -1 4194560 100 0 0 0 10 5 0 0 20 0 9 0 290 30000000 2000 4294967295" > "$SROOT/proc/$MS_EARLY/stat"
+echo "b6c00000-b6c10000 r-xp 00000000 b3:19 98 /system/lib/soundfx/libbundlewrapper.so" > "$SROOT/proc/$MS_EARLY/maps"
+PATH="$T/stubs:/usr/bin:/bin" EQE_TEST_ROOT="$SROOT" EQE_PROC="$SROOT/proc" \\
+    EQE_RAM_DIR="$SROOT/dev/eqengine" EQE_HMGAPID="$T/stubs/hmgapid" \\
+    EQE_RUNWAY_WAIT=0 EQE_CAP_MAX=6 EQE_GOOD_AFTER=5 EQE_KEEP_CMD="$T/stubs/keeper" \\
+    sh "$M/bin/boot.sh" >/dev/null 2>&1 &
+BPID=$!
+i=0
+while [ $i -lt 80 ] && ! grep -q "confirmed good" "$SROOT/data/eqengine/state/events.log" 2>/dev/null; do
+    /bin/sleep 0.02
+    i=$((i + 1))
+done
+kill -TERM "$BPID" 2>/dev/null || true
+wait "$BPID" 2>/dev/null || true
+kill "$MS_EARLY" 2>/dev/null || true
+has "early cold-boot late mediaserver reloaded cleanly" "result=reloaded_early" "$(cat "$SROOT/data/eqengine/state/boot_timing")"
+has "early reload recorded respawned pid 201" "audio_server_pid=201" "$(cat "$SROOT/data/eqengine/state/boot_timing")"
+check "early reload left no late_list marker" "no" "$(test -f "$SROOT/data/eqengine/state/late_list" && echo yes || echo no)"
+has "early reload caused zero unexpected restarts" "unexpected_restarts=0" "$(cat "$SROOT/data/eqengine/state/status")"
+check "early reload caused zero strikes" "0" "$(cat "$SROOT/data/eqengine/state/strikes")"
+
+# 3g. Verify act.sh keep late_list guard and cold-boot blockMedia keep_idle retry at IDLE_AFTER=8
+mkdir -p "$T/fake_car"
+: > "$T/fake_car/audio.primary.tcc803x.so"
+cat > "$T/run_3g.sh" <<'EOF_3G'
+#!/bin/bash
+set -e
+R=$1
+EQE_CAR=$2
+SH=dash
+ACT=$R/eq-engine/bin/act.sh
+eval "$(sed -n '6,223p;330,642p' "$R/tests/act/run.sh")"
+labsetup
+rm -f "$T/playing"; "$T/stubs/asound"
+echo "bootX 5056" > "$LS/late_list"
+keepi 5
+ok "keeper: late_list skips Hold.java completely when mediaserver missed overlay" "[ ! -f $T/hold.log ] && grep -q 'filter is not loaded in this audio server' $LS/output.log"
+labsetup
+rm -f "$T/playing" "$LS/late_list"; touch "$T/hold_fail_once"; "$T/stubs/asound"
+IDLE=8 keep 22
+ok "keeper: cold-boot blockMedia failure at IDLE_AFTER=8 retries once 8 s later and switches to 48 kHz" '[ $(wc -l < $T/hold.log) = 2 ] && [ "$(ost state)" = 48k ]'
+[ "$fail" = 0 ]
+EOF_3G
+bash "$T/run_3g.sh" "$HERE" "$T/fake_car"
 
 eng remove eq-engine
 check "eq-engine remove succeeds" 0 "$rc"
@@ -1427,7 +1802,7 @@ def patch_boot_test_speedup(repo: Path) -> None:
 
 
 def prepare_eq_engine(repo: Path, hmgapi_dir: Path) -> None:
-    print("== Preparing eq-engine 0.7.7 (on alexkozler/Gen5W-EQ-Engine @ 2feb050)")
+    print("== Preparing eq-engine 0.7.8 (on alexkozler/Gen5W-EQ-Engine @ 2feb050)")
     reconstruct_stock_audio_effects(repo)
     patch_native_and_app(repo)
     patch_act_sh(repo)

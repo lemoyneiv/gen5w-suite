@@ -145,11 +145,11 @@ do
     check "$P: eq-engine authors" "alexkozler, lemoyneiv" "$(mod_authors eq-engine)"
     check "$P: wireless-carplay-aa version 2.2.7" "2.2.7" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
-    check "$P: hmgapi-comfort version 1.1.9" "1.1.9" \
+    check "$P: hmgapi-comfort version 1.1.10" "1.1.10" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/hmgapi-comfort/mod.json")"
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
-    check "$P: eq-engine version 0.7.7" "0.7.7" \
+    check "$P: eq-engine version 0.7.8" "0.7.8" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/eq-engine/mod.json")"
 
     # Plan across ALL mods simultaneously (verify pre-seeded hmgapi-openlink causes 0 warnings before OpenLink is installed)
@@ -243,11 +243,11 @@ with zipfile.ZipFile(matches[-1]) as z:
     print(json.loads(z.read("mod.json"))["version"])
 PY
 )
-    echo "== Standalone Comfort (${CVER}), Light Vibes (0.7.0) & EQ Engine (0.7.7) package verification =="
+    echo "== Standalone Comfort (${CVER}), Light Vibes (0.7.0) & EQ Engine (0.7.8) package verification =="
     for spec in \
         "hmgapi-comfort:${CVER}" \
         "light-vibes:0.7.0" \
-        "eq-engine:0.7.7"
+        "eq-engine:0.7.8"
     do
         mid=${spec%:*}
         mver=${spec#*:}
