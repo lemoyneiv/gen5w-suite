@@ -7,7 +7,7 @@
 #   dist/gen5w-suite-usb.zip                 One-tap NEMESIS execute USB stick (recommended)
 #   dist/gen5w-suite-nemesis-store-usb.zip   Interactive NEMESIS USB Package Store stick (type=list)
 #   dist/gen5w-suite-hmgapi-updates-usb.zip  HMG-API Updates stick (HMGAPI/updates/*.zip)
-#   dist/standalone/*.zip                    Standalone Comfort (1.1.10), Light Vibes (0.7.0) & EQ Engine (0.7.8)
+#   dist/standalone/*.zip                    Standalone Comfort (1.1.11), Light Vibes (0.7.0) & EQ Engine (0.7.8)
 #   dist/mods/*.zip                          Individual signed HMG-API + NEMESIS packages
 #   dist/SHA256SUMS                          SHA-256 checksums
 set -e
@@ -155,7 +155,7 @@ PY
 }
 
 WIRELESS_SHA=084486ac13260d27937bd9a69c996e94acfbea57
-COMFORT_SHA=a4be270e612c19d88ca8bf67af6b107bc9767637
+COMFORT_SHA=32b5209e628cc533a55ea966996313699f19be6f
 LIGHT_VIBES_SHA=dc0704927920e43882f84bc35ef87dbb6eeed9c6
 EQ_ENGINE_SHA=2feb050ebc63aaf1aeca10d136b5a7bb0add1002
 ADB_TAG=v1.0.1-rc.1
@@ -177,9 +177,9 @@ fetch_upstream light-vibes           https://github.com/lemoyneiv/light-vibes.gi
 fetch_upstream tinyalsa              https://github.com/tinyalsa/tinyalsa.git              a7cd26a17fe2add2ff38d2f281ed0b919187a068
 fetch_upstream Gen5W-EQ-Engine       https://github.com/alexkozler/Gen5W-EQ-Engine.git     "$EQ_ENGINE_SHA"
 
-fetch_release_asset Open-HMG/HMG-API v1.1.0-rc.3 hmgapi-mod-sdk-1.1.0-rc.3.zip \
-    46feac3383774fcddbbeed5d2abcfe95782efb0b34191dff89bb832e9b4cef63 \
-    "$REL_CACHE/sdk/hmgapi-mod-sdk-1.1.0-rc.3.zip"
+fetch_release_asset Open-HMG/HMG-API v1.1.0-rc.10 hmgapi-mod-sdk-1.1.0-rc.10.zip \
+    48e362e3ec83d826c384b21c8237eb475d87b4e4c9dbc7bcc7dfcc1178b68368 \
+    "$REL_CACHE/sdk/hmgapi-mod-sdk-1.1.0-rc.10.zip"
 fetch_release_asset Open-HMG/hmgapi-adb "$ADB_TAG" "adb-${ADB_VER}.zip" \
     37f18d4fd5161b91bd740345613ea5803cc1bc766202513cd736739f27bd9538 \
     "$REL_CACHE/adb/adb-${ADB_VER}.zip"
@@ -244,12 +244,6 @@ echo "=================================================================="
     mkdir -p out/staged/wireless-carplay-aa
     unzip -q "$z" -d out/staged/wireless-carplay-aa
 )
-if [ -f "$REL_CACHE/suite-signed/wireless-carplay-aa-v2.2.7.hmgapi.zip" ] && \
-   echo "${WIRELESS_REL_SHA}  $REL_CACHE/suite-signed/wireless-carplay-aa-v2.2.7.hmgapi.zip" | sha256sum -c - >/dev/null 2>&1; then
-    verify_official_mod "$REL_CACHE/suite-signed/wireless-carplay-aa-v2.2.7.hmgapi.zip" "$LEGACY_SUITE_UUID"
-    cp "$REL_CACHE/suite-signed/wireless-carplay-aa-v2.2.7.hmgapi.zip" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.7.hmgapi.zip"
-    cp "$REL_CACHE/suite-signed/wireless-carplay-aa-v2.2.7-nemesis-package.zip" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.7-nemesis-package.zip"
-fi
 WIRELESS_BUILT="$WORK_SRC/hmgapi-wireless-cp-aa/out/staged/wireless-carplay-aa"
 
 echo ""
@@ -296,7 +290,7 @@ echo "=================================================================="
 (
     cd "$WORK_SRC/hmgapi-comfort"
     mkdir -p .cache/sdk
-    cp "$REL_CACHE/sdk/hmgapi-mod-sdk-1.1.0-rc.3.zip" .cache/sdk/
+    cp "$REL_CACHE/sdk/hmgapi-mod-sdk-1.1.0-rc.10.zip" .cache/sdk/
     env -u HMGAPI_SDK -u HMGAPI_FLOOR_POINTS sh ./build.sh
 )
 COMFORT_HMG="$WORK_SRC/hmgapi-comfort/dist/hmgapi-comfort-v${CVER}.zip"

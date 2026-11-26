@@ -307,7 +307,7 @@ install_suite_mod() {
     fi
 }
 
-install_suite_mod wireless-carplay-aa "$USB/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip" "$SUITE_UUID"
+install_suite_mod wireless-carplay-aa "$USB/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip" "$SUITE_V2_UUID"
 install_suite_mod adb                 "$USB/HMGAPI/updates/02-adb.hmgapi.zip"                 "$VYSSE_UUID"
 install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"              "$SUITE_UUID"
 install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"          "$EGMP_UUID"

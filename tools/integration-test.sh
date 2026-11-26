@@ -124,7 +124,7 @@ do
             04-egmp-aa-ev.hmgapi.zip)
                 has "$P: ${z##*/} signed by official AwsomeFox key" \
                     "author key 839375d3-8aea-884a-a9e9-c79964fe5d88" "$out" ;;
-            05-hmgapi-comfort.hmgapi.zip|07-eq-engine.hmgapi.zip)
+            01-wireless-carplay-aa.hmgapi.zip|05-hmgapi-comfort.hmgapi.zip|07-eq-engine.hmgapi.zip)
                 has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" \
                     "author   lemoyneiv (author key 5aa22839-7070-8177-9660-14941b7463c5, on HMG-API's trusted author list)" "$out" ;;
             *)
@@ -145,7 +145,7 @@ do
     check "$P: eq-engine authors" "alexkozler, lemoyneiv" "$(mod_authors eq-engine)"
     check "$P: wireless-carplay-aa version 2.2.7" "2.2.7" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
-    check "$P: hmgapi-comfort version 1.1.10" "1.1.10" \
+    check "$P: hmgapi-comfort version 1.1.11" "1.1.11" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/hmgapi-comfort/mod.json")"
     check "$P: light-vibes version 0.7.0" "0.7.0" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/light-vibes/mod.json")"
