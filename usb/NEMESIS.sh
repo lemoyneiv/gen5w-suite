@@ -30,6 +30,7 @@ echo "=== Gen5W Suite install $(date) from $USB ===" > "$LOG"
 
 SUITE_UUID="28ad71e0-07c0-8e61-8bf3-380cc71f9280"
 SUITE_V2_UUID="5aa22839-7070-8177-9660-14941b7463c5"
+SUITE_V3_UUID="8c82dc63-8f40-8543-b2f4-672f57db9d61"
 
 msg() {
     echo "$1"
@@ -307,7 +308,7 @@ install_suite_mod() {
     fi
 }
 
-install_suite_mod wireless-carplay-aa "$USB/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip" "$SUITE_V2_UUID"
+install_suite_mod wireless-carplay-aa "$USB/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip" "$SUITE_V3_UUID"
 install_suite_mod adb                 "$USB/HMGAPI/updates/02-adb.hmgapi.zip"                 "$VYSSE_UUID"
 install_suite_mod aa-dpi              "$USB/HMGAPI/updates/03-aa-dpi.hmgapi.zip"              "$SUITE_UUID"
 install_suite_mod egmp-aa-ev          "$USB/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"          "$EGMP_UUID"

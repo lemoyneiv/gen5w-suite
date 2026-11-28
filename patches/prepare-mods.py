@@ -226,13 +226,14 @@ DIPO_PICTURE_BLOCK = """    static Handler pictureHandler;
 
 
 def patch_wireless(repo: Path) -> None:
-    print("== Preparing wireless-carplay-aa 2.2.7 (on lemoyneiv/hmgapi-wireless-cp-aa @ 084486a)")
+    print("== Preparing wireless-carplay-aa 2.2.8 (on lemoyneiv/hmgapi-wireless-cp-aa @ 5997f7e)")
 
     # Verify Watchdog was never introduced anywhere
     assert not (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Watchdog.java").exists()
     assert not (repo / "wireless-carplay-aa/tools/watchdog").exists()
-    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/NaviBridge.java").exists(), "Expected NaviBridge.java from 084486a"
-    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/AaNavState.java").exists(), "Expected AaNavState.java from 084486a"
+    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/NaviBridge.java").exists(), "Expected NaviBridge.java"
+    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/AaNavState.java").exists(), "Expected AaNavState.java"
+    assert (repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/AaCompass.java").exists(), "Expected AaCompass.java from 5997f7e"
 
     dipo_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Dipo.java"
     bridge_java = repo / "wireless-carplay-aa/src/hmgapi/mods/wireless/dipo/Bridge.java"
@@ -244,12 +245,12 @@ def patch_wireless(repo: Path) -> None:
     test_sh_text = (repo / "wireless-carplay-aa/test.sh").read_text(encoding="utf-8")
     assert '"hmgapi@>=1.0,!wireless.projection,!projection.tbt,!enhanced.projection"' in test_sh_text
 
-    # Update mod.json (preserve 084486a system matrix, wifi.projection, trap-frame hooks, CarPlay identity, and conflicts)
+    # Update mod.json (preserve 5997f7e system matrix, wifi.projection, trap-frame & AA compass hooks, CarPlay identity, and conflicts)
     mod_path = repo / "wireless-carplay-aa/mod.json"
     mod = json.loads(mod_path.read_text(encoding="utf-8"))
-    mod["version"] = "2.2.7"
+    mod["version"] = "2.2.8"
     mod["hmgapi"] = ">=1.1.1"
-    assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in 084486a mod.json, got {mod.get('wifi')}"
+    assert mod.get("wifi") == {"projection": True}, f"Expected wifi.projection in mod.json, got {mod.get('wifi')}"
     assert "libiap2session.so" in mod["hooks"]["native"], "Expected CarPlay identity recipe in mod.json"
     assert "enhanced.projection" in mod.get("nemesis_conflicts", []), "Expected enhanced.projection in mod.json"
     add_coauthor(mod)
@@ -267,9 +268,9 @@ def patch_wireless(repo: Path) -> None:
     pts = mod["hooks"]["points"]
     assert pts.get("framework.navigation_cluster.update_tbt_trap_info") == "change"
     assert pts.get("framework.navigation_cluster.update_tbt_trap_info_new") == "change"
+    assert pts.get("gpm.sensor_source.init") == "change"
     pts["dipo.carplay.decode_failure"] = "observe"
     pts["dipo.carplay.screen_timeout"] = "observe"
-    pts["gpm.sensor_source.init"] = "observe"
     pts["gpm.receiver_service.disconnected"] = "observe"
     pts["gpm.receiver_service.on_create"] = "observe"
     pts["gpm.receiver_service.connect_wireless_session"] = "observe"
@@ -398,6 +399,7 @@ def patch_wireless(repo: Path) -> None:
         if (IAP2.equals(app.packageName)) iap2(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("usb_drives", true)) usbDrives(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
+        if (GPM.equals(app.packageName) && mod.settingBoolean("aa_compass", true)) AaCompass.installGpm(mod, app);
         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
         if ((SYSTEM_POPUP.equals(app.packageName) || LAUNCHER.equals(app.packageName) || SETTINGS_APP.equals(app.packageName))
                 && mod.settingBoolean("menu", true)) popupSettings(mod, app);
@@ -412,6 +414,7 @@ def patch_wireless(repo: Path) -> None:
         if (GPM.equals(app.packageName) && mod.settingBoolean("projection_focus", true)) FocusGuard.gpm(mod, app);
         if (GPM.equals(app.packageName) && (mod.settingBoolean("projection_focus", true) || mod.settingBoolean("bridge", true))) ParkSession.gpm(mod, app);
         if (GPM.equals(app.packageName) && mod.settingBoolean("tbt", true)) gpmTurnByTurn(mod, app);
+        if (GPM.equals(app.packageName) && mod.settingBoolean("aa_compass", true)) AaCompass.installGpm(mod, app);
         if (BTSETTINGS.equals(app.packageName) && mod.settingBoolean("menu", true)) phoneProjectionMenu(mod, app);
         if ((SYSTEM_POPUP.equals(app.packageName) || LAUNCHER.equals(app.packageName) || SETTINGS_APP.equals(app.packageName))
                 && mod.settingBoolean("menu", true)) popupSettings(mod, app);

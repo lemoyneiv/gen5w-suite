@@ -118,13 +118,16 @@ do
         eng install "$z" --from-nemesis
         check "$P: install ${z##*/}" 0 "$rc"
         case "${z##*/}" in
+            01-wireless-carplay-aa.hmgapi.zip)
+                has "$P: ${z##*/} signed by suite v3 author key" \
+                    "author key 8c82dc63-8f40-8543-b2f4-672f57db9d61" "$out" ;;
             02-adb.hmgapi.zip)
                 has "$P: ${z##*/} signed by official VysseCodes key" \
                     "author   VysseCodes (author key 7251ce71-a146-8a1e-958b-dbffc6af7359, on HMG-API's trusted author list)" "$out" ;;
             04-egmp-aa-ev.hmgapi.zip)
                 has "$P: ${z##*/} signed by official AwsomeFox key" \
                     "author key 839375d3-8aea-884a-a9e9-c79964fe5d88" "$out" ;;
-            01-wireless-carplay-aa.hmgapi.zip|05-hmgapi-comfort.hmgapi.zip|07-eq-engine.hmgapi.zip)
+            05-hmgapi-comfort.hmgapi.zip|07-eq-engine.hmgapi.zip)
                 has "$P: ${z##*/} recognized on trusted author list as lemoyneiv" \
                     "author   lemoyneiv (author key 5aa22839-7070-8177-9660-14941b7463c5, on HMG-API's trusted author list)" "$out" ;;
             *)
@@ -143,7 +146,7 @@ do
     check "$P: hmgapi-comfort original author" "lemoyneiv" "$(mod_authors hmgapi-comfort)"
     check "$P: light-vibes authors" "Kyle (dibble9012), lemoyneiv" "$(mod_authors light-vibes)"
     check "$P: eq-engine authors" "alexkozler, lemoyneiv" "$(mod_authors eq-engine)"
-    check "$P: wireless-carplay-aa version 2.2.7" "2.2.7" \
+    check "$P: wireless-carplay-aa version 2.2.8" "2.2.8" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/wireless-carplay-aa/mod.json")"
     check "$P: hmgapi-comfort version 1.1.11" "1.1.11" \
         "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$R/data/hmgapi/mods/hmgapi-comfort/mod.json")"
@@ -158,7 +161,7 @@ do
     hasnt "$P: no mod refuses or fails to load hooks" "won't load" "$out"
     hasnt "$P: no hook conflicts" "conflict" "$out"
     hasnt "$P: pre-seeded uninstalled hmgapi-openlink emits no cellular warning" "hmgapi-openlink: may use the car's cellular link" "$out"
-    has "$P: gpm.sensor_source.init shared cleanly (aa-dpi + egmp-aa-ev + wireless)" "wireless-carplay-aa (observe)" "$out"
+    has "$P: gpm.sensor_source.init shared cleanly (aa-dpi + egmp-aa-ev + wireless)" "wireless-carplay-aa (change)" "$out"
     has "$P: gpm.navigation_status.next_turn shared cleanly (wireless + egmp)" "gpm.navigation_status.next_turn: " "$out"
     has "$P: wifi.projection AP keeper planned" "the projection AP up from boot, once each boot, unless a Wi-Fi client is on [wireless-carplay-aa]" "$out"
 
@@ -221,11 +224,11 @@ import json, sys
 s = json.load(open(sys.argv[1]))["mods"]["wireless-carplay-aa"]["settings"]
 if isinstance(s, list):
     s = {x["key"]: x.get("value", x.get("default")) for x in s}
-print(f"projection_focus={s.get('projection_focus')} tbt_standard={s.get('tbt_standard')} picture={s.get('picture')}")
+print(f"projection_focus={s.get('projection_focus')} tbt_standard={s.get('tbt_standard')} aa_compass={s.get('aa_compass')} picture={s.get('picture')}")
 PY
 )
-    check "$P: wireless-carplay-aa published defaults (projection_focus=True, tbt_standard=True, picture=True)" \
-        "projection_focus=True tbt_standard=True picture=True" "$WL_FOCUS"
+    check "$P: wireless-carplay-aa published defaults (projection_focus=True, tbt_standard=True, aa_compass=True, picture=True)" \
+        "projection_focus=True tbt_standard=True aa_compass=True picture=True" "$WL_FOCUS"
 
     # Restore everything back to stock and verify byte-identical /system
     eng restore

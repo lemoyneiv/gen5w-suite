@@ -154,7 +154,7 @@ with zipfile.ZipFile(nem_usb, "w", zipfile.ZIP_DEFLATED) as z:
 PY
 }
 
-WIRELESS_SHA=084486ac13260d27937bd9a69c996e94acfbea57
+WIRELESS_SHA=5997f7ecf16d355a71a9e556b05d5f52f539ff4b
 COMFORT_SHA=32b5209e628cc533a55ea966996313699f19be6f
 LIGHT_VIBES_SHA=dc0704927920e43882f84bc35ef87dbb6eeed9c6
 EQ_ENGINE_SHA=2feb050ebc63aaf1aeca10d136b5a7bb0add1002
@@ -165,10 +165,11 @@ EGMP_TAG=v0.8.2
 EGMP_VER=0.8.2
 EGMP_UUID=839375d3-8aea-884a-a9e9-c79964fe5d88
 LEGACY_SUITE_UUID=28ad71e0-07c0-8e61-8bf3-380cc71f9280
-WIRELESS_REL_SHA=3c169c30242a030876b9f7c2af8d441efb99cc287659fd5d129a53e4f67eacd4
+SUITE_V2_UUID=5aa22839-7070-8177-9660-14941b7463c5
 AADPI_REL_SHA=60ffccd21822a4334080329a4bdf4a30ffc82bb5b5d600f5aee2c68514866a17
-COMFORT_REL_SHA=6dbe534dd33c5cabea7734548fbbcc366938c8ea62ec7480d4633c5a041fc354
+COMFORT_REL_SHA=d01dfcc8dc4a1cffeab7cee84533a7a681666dcb0a28769bbd4edcc9624f3ac2
 LIGHT_VIBES_REL_SHA=027724010e5ca198b086f5d49afb7d137efd40af6c3f3271dd2b30be4cc5e641
+EQ_REL_SHA=fb901a9c892f2a34af5aab13f500a959f9c2876b83eb3727e64952305960dce9
 
 fetch_upstream hmgapi-wireless-cp-aa https://github.com/lemoyneiv/hmgapi-wireless-cp-aa.git "$WIRELESS_SHA"
 fetch_upstream hmg-aa-dpi            https://github.com/eliotwass/hmg-aa-dpi.git           4222625d25e2776f926cf372ff3220fc3ec6d20c
@@ -224,7 +225,7 @@ python3 "$SUITE_ROOT/patches/prepare-mods.py" --work-dir "$WORK_SRC" --hmgapi "$
 
 echo ""
 echo "=================================================================="
-echo " STEP 2: Building, Testing & Signing wireless-carplay-aa 2.2.7"
+echo " STEP 2: Building, Testing & Signing wireless-carplay-aa 2.2.8"
 echo "=================================================================="
 (
     cd "$WORK_SRC/hmgapi-wireless-cp-aa"
@@ -239,8 +240,8 @@ echo "=================================================================="
     echo "$out"
     z=$(echo "$out" | tail -1)
     sh "$HMGAPI_SDK/bin/mknemesismod.sh" "$z"
-    cp "$z" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.7.hmgapi.zip"
-    cp out/dist/wireless-carplay-aa-2.2.7-nemesis-package.zip "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.7-nemesis-package.zip"
+    cp "$z" "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.8.hmgapi.zip"
+    cp out/dist/wireless-carplay-aa-2.2.8-nemesis-package.zip "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.8-nemesis-package.zip"
     mkdir -p out/staged/wireless-carplay-aa
     unzip -q "$z" -d out/staged/wireless-carplay-aa
 )
@@ -297,7 +298,7 @@ COMFORT_HMG="$WORK_SRC/hmgapi-comfort/dist/hmgapi-comfort-v${CVER}.zip"
 COMFORT_NEM="$WORK_SRC/hmgapi-comfort/dist/hmgapi-comfort-v${CVER}-nemesis-package.zip"
 if [ -f "$REL_CACHE/suite-signed/hmgapi-comfort-v${CVER}.hmgapi.zip" ] && \
    echo "${COMFORT_REL_SHA}  $REL_CACHE/suite-signed/hmgapi-comfort-v${CVER}.hmgapi.zip" | sha256sum -c - >/dev/null 2>&1; then
-    verify_official_mod "$REL_CACHE/suite-signed/hmgapi-comfort-v${CVER}.hmgapi.zip" "$LEGACY_SUITE_UUID"
+    verify_official_mod "$REL_CACHE/suite-signed/hmgapi-comfort-v${CVER}.hmgapi.zip" "$SUITE_V2_UUID"
     COMFORT_HMG="$REL_CACHE/suite-signed/hmgapi-comfort-v${CVER}.hmgapi.zip"
     COMFORT_NEM="$REL_CACHE/suite-signed/hmgapi-comfort-v${CVER}-nemesis-package.zip"
 fi
@@ -346,6 +347,12 @@ echo "=================================================================="
 )
 EQ_HMG="$WORK_SRC/Gen5W-EQ-Engine/dist/eq-engine-v${EQVER}.hmgapi.zip"
 EQ_NEM="$WORK_SRC/Gen5W-EQ-Engine/dist/eq-engine-v${EQVER}-nemesis-package.zip"
+if [ -f "$REL_CACHE/suite-signed/eq-engine-v${EQVER}.hmgapi.zip" ] && \
+   echo "${EQ_REL_SHA}  $REL_CACHE/suite-signed/eq-engine-v${EQVER}.hmgapi.zip" | sha256sum -c - >/dev/null 2>&1; then
+    verify_official_mod "$REL_CACHE/suite-signed/eq-engine-v${EQVER}.hmgapi.zip" "$SUITE_V2_UUID"
+    EQ_HMG="$REL_CACHE/suite-signed/eq-engine-v${EQVER}.hmgapi.zip"
+    EQ_NEM="$REL_CACHE/suite-signed/eq-engine-v${EQVER}-nemesis-package.zip"
+fi
 cp "$EQ_HMG" "$SUITE_ROOT/dist/mods/eq-engine-v${EQVER}.hmgapi.zip"
 cp "$EQ_NEM" "$SUITE_ROOT/dist/mods/eq-engine-v${EQVER}-nemesis-package.zip"
 wrap_standalone_usb "eq-engine" "$EQVER" "$EQ_HMG" "$EQ_NEM" "$SUITE_ROOT/dist/standalone"
@@ -370,7 +377,7 @@ mkdir -p "$STAGE_EXEC/packages" "$STAGE_EXEC/HMGAPI/updates" \
 # Populate HMGAPI/FORCE and ordered HMGAPI/updates/*.hmgapi.zip
 for d in "$STAGE_EXEC" "$STAGE_LIST" "$STAGE_UPD"; do
     : > "$d/HMGAPI/FORCE"
-    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.7.hmgapi.zip" "$d/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip"
+    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.8.hmgapi.zip" "$d/HMGAPI/updates/01-wireless-carplay-aa.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/adb-v${ADB_VER}.hmgapi.zip"            "$d/HMGAPI/updates/02-adb.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0.hmgapi.zip"              "$d/HMGAPI/updates/03-aa-dpi.hmgapi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v${EGMP_VER}.hmgapi.zip"    "$d/HMGAPI/updates/04-egmp-aa-ev.hmgapi.zip"
@@ -382,7 +389,7 @@ done
 # Populate NEMESIS packages/ folder for both NEMESIS sticks
 for d in "$STAGE_EXEC" "$STAGE_LIST"; do
     cp "$CORE_NEM_PKG"                                                         "$d/packages/hmgapi.zip"
-    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.7-nemesis-package.zip" "$d/packages/hmgapi.wireless-carplay-aa.zip"
+    cp "$SUITE_ROOT/dist/mods/wireless-carplay-aa-v2.2.8-nemesis-package.zip" "$d/packages/hmgapi.wireless-carplay-aa.zip"
     cp "$SUITE_ROOT/dist/mods/adb-v${ADB_VER}-nemesis-package.zip"            "$d/packages/hmgapi.adb.zip"
     cp "$SUITE_ROOT/dist/mods/aa-dpi-v0.3.0-nemesis-package.zip"              "$d/packages/hmgapi.aa-dpi.zip"
     cp "$SUITE_ROOT/dist/mods/egmp-aa-ev-v${EGMP_VER}-nemesis-package.zip"    "$d/packages/hmgapi.egmp-aa-ev.zip"
@@ -411,8 +418,8 @@ published=${TODAY}
 
 [package.1]
 path=packages/hmgapi.wireless-carplay-aa.zip
-name=Wireless CarPlay + Android Auto (2.2.7)
-short-desc=Wireless CP/AA (TBT & compass overhaul), AR HUD/cluster intersections, BT focus & freeze fixes
+name=Wireless CarPlay + Android Auto (2.2.8)
+short-desc=Wireless CP/AA, AA car compass, AR HUD/cluster intersections, BT focus & freeze fixes
 published=${TODAY}
 
 [package.2]
